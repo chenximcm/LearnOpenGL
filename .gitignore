@@ -1,0 +1,40 @@
+# Visual Studio
+.vs/
+*.sln.docstates
+*.user
+*.suo
+*.cache
+*.log
+*.obj
+*.tlog
+*.pdb
+*.ilk
+*.ipch
+*.iobj
+*.ipdb
+
+# Build output
+x64/
+Debug/
+Release/
+*.exe
+*.pdb
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vendor binaries (keep headers, ignore .lib/.dll)
+vendor/**/*.lib
+vendor/**/*.dll
+vendor/**/*.a
+vendor/**/*.so
+
+# Claude files
+.claude/
