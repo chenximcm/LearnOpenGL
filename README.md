@@ -24,7 +24,8 @@ LearnOpenGL/
 ├── LearnOpenGL.sln         # Visual Studio 解决方案
 ├── LearnOpenGL.vcxproj     # 项目文件
 ├── notes/                  # 学习笔记
-│   └── 01-创建窗口-知识点.md
+│   ├── 01-创建窗口-知识点.md
+│   └── 02-Hello-Triangle-知识点.md
 └── README.md
 ```
 
@@ -34,6 +35,8 @@ LearnOpenGL/
 |------|------|------|
 | 2026-06-03 | 创建窗口 — 配置 GLFW + GLAD，显示窗口，设置清屏颜色 | [创建窗口](https://learnopengl-cn.github.io/01%20Getting%20started/02%20Creating%20a%20window/) |
 | 2026-06-05 | 知识点整理 — 创建窗口章节知识博客 | [笔记](notes/01-创建窗口-知识点.md) |
+| 2026-06-06 | Hello Triangle — VAO/VBO/着色器，绘制第一个三角形 | [Hello Triangle](https://learnopengl-cn.github.io/01%20Getting%20started/04%20Hello%20Triangle/) |
+| 2026-06-06 | 知识点整理 — Hello Triangle 章节知识博客 | [笔记](notes/02-Hello-Triangle-知识点.md) |
 
 ### 改动记录
 
