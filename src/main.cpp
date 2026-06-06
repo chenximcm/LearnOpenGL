@@ -5,13 +5,16 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include "shader.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     glViewport(0, 0, width, height);
 }
 
-// 顶点着色器源码（GLSL）
+// ========== 着色器源码 ==========
+
+// 顶点着色器（GLSL）
 const char* vertexShaderSource =
     "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
@@ -21,7 +24,7 @@ const char* vertexShaderSource =
     "    gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
     "}\n";
 
-// 片段着色器源码（GLSL）
+// 片段着色器（GLSL）
 const char* fragmentShaderSource =
     "#version 330 core\n"
     "out vec4 FragColor;\n"
@@ -60,94 +63,65 @@ int main()
     glViewport(0, 0, 800, 600);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    // ========== 5. 编译着色器 ==========
-
-    // 编译顶点着色器
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-
-    // 检查编译是否成功
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
-        return -1;
-    }
-
-    // 编译片段着色器
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-        return -1;
-    }
-
-    // 链接着色器程序
-    unsigned int shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success)
-    {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-        return -1;
-    }
-
-    // 链接完成后，可以删除着色器对象
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
+    // ========== 5. 编译着色器（使用 Shader 类）==========
+    Shader shader(vertexShaderSource, fragmentShaderSource);
 
     // ========== 6. 顶点数据 ==========
+    // 矩形的 4 个顶点（只需要 4 个，因为 EBO 复用顶点）
     float vertices[] = {
-        -0.5f, -0.5f, 0.0f,   // 左下角
-         0.5f, -0.5f, 0.0f,   // 右下角
-         0.0f,  0.5f, 0.0f    // 顶部
+         0.5f,  0.5f, 0.0f,   // 右上角 (索引 0)
+         0.5f, -0.5f, 0.0f,   // 右下角 (索引 1)
+        -0.5f, -0.5f, 0.0f,   // 左下角 (索引 2)
+        -0.5f,  0.5f, 0.0f    // 左上角 (索引 3)
     };
 
-    // ========== 7. VAO & VBO ==========
-    unsigned int VAO, VBO;
+    // 索引数据 —— 定义两个三角形
+    unsigned int indices[] = {
+        0, 1, 3,   // 第一个三角形：右上 → 右下 → 左上
+        1, 2, 3    // 第二个三角形：右下 → 左下 → 左上
+    };
+
+    // ========== 7. VAO & VBO & EBO ==========
+    unsigned int VAO, VBO, EBO;
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
 
-    // 绑定 VAO → 绑定 VBO → 设置顶点属性 → 解绑
+    // 绑定 VAO → 绑定 VBO → 绑定 EBO → 设置顶点属性 → 解绑
     glBindVertexArray(VAO);
 
+    // --- VBO：上传顶点数据 ---
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
+    // --- EBO：上传索引数据 ---
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    // --- 设置顶点属性 ---
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // 解绑（好习惯，但非必需）
+    // 解绑 VBO + VAO（EBO 由 VAO 记录，不手动解绑）
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
     // ========== 8. 设置清屏颜色 ==========
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
+    // 线框模式（按需取消注释）
+    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
     // ========== 9. 渲染循环 ==========
     while (!glfwWindowShouldClose(window))
     {
-        // 清屏
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // 使用着色器程序
-        glUseProgram(shaderProgram);
+        // 使用 Shader 类 + EBO 索引绘制
+        shader.use();
         glBindVertexArray(VAO);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
         glfwPollEvents();
         glfwSwapBuffers(window);
@@ -156,7 +130,7 @@ int main()
     // ========== 10. 清理资源 ==========
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
-    glDeleteProgram(shaderProgram);
+    glDeleteBuffers(1, &EBO);
 
     glfwTerminate();
     return 0;

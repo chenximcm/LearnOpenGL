@@ -469,7 +469,7 @@ glEnableVertexAttribArray(location)
 
 > **📝 学习日期**：2026-06-06 | **上一个章节**：[创建窗口](01-创建窗口-知识点.md)
 >
-> **下一个章节**：着色器（Shaders）— 深入学习 GLSL、uniform、属性插值
+> **下一个章节**：[EBO 与 Shader 封装](03-EBO与Shader封装-知识点.md) — 索引缓冲对象、索引绘制、Shader 类封装
 
 <style>
 .codehilite { color: #d4d4d4; }

@@ -23,6 +23,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\shader.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll">
       <Filter>资源文件</Filter>
     </None>
