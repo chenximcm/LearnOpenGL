@@ -424,6 +424,66 @@ ImGui::SliderFloat("旋转速度", &rotateSpeed, 0.0f, 360.0f);
 // → trans = glm::rotate(trans, time * glm::radians(rotateSpeed), ...);
 ```
 
+### 8.3 ⚠️ 常见陷阱：UI 变量绑定了，但渲染没跟上
+
+这是 ImGui 新手最容易犯的错误——**UI 控件确实修改了变量值，但渲染代码根本没用这个变量**。
+
+以纹理选择为例：
+
+```cpp
+// ❌ 错误写法
+
+// UI 部分 —— 值确实变了
+int textureMode = 0;
+ImGui::RadioButton("双纹理混合", &textureMode, 0);
+ImGui::RadioButton("仅 container", &textureMode, 1);
+ImGui::RadioButton("仅 awesomeface", &textureMode, 2);
+
+// 渲染部分 —— 完全没读 textureMode！
+// 不管用户选什么，永远绑两张纹理
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, texture1);
+glActiveTexture(GL_TEXTURE1);
+glBindTexture(GL_TEXTURE_2D, texture2);
+// ↑ 错误：textureMode 被忽略了！
+```
+
+记住：**ImGui 只负责修改变量值，不负责让你的代码去读它。**
+
+```cpp
+// ✅ 正确写法
+
+// 渲染部分根据 textureMode 做分支
+if (textureMode == 0)
+{
+    // 双纹理混合
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture1);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, texture2);
+}
+else if (textureMode == 1)
+{
+    // 仅 container：两个纹理单元都绑同一张
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture1);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, texture1);
+}
+else
+{
+    // 仅 awesomeface
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texture2);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, texture2);
+}
+```
+
+**检查清单**：每添加一个 ImGui 控件后，问自己三个问题：
+
+| # | 问题 | 说明 |
+|:-:|------|------|
+| 1 | 控件绑定了哪个变量？ | `ImGui::SliderFloat("名", &变量, ...)` |
+| 2 | 渲染代码在哪里读取这个变量？ | `glClearColor(变量[0], ...)` |
+| 3 | 读取路径被正确执行了吗？ | 条件分支、函数参数等 |
+
+> 本例中的纹理选择就是一个典型：RadioButton 确实修改了 `textureMode`，但纹理绑定部分的 `if/else` 压根没写，导致 UI 怎么点都没反应。
+
 ### 8.3 Demo 窗口
 
 ```cpp
@@ -592,6 +652,11 @@ Begin/End 必须成对，否则断言失败
 ❌ 字体加载在 Init 后端之后
    → 字体图集未正确上传到 GPU
    ✅ 修复：AddFontFromFileTTF 在 ImGui_ImplOpenGL3_Init 之前
+
+❌ UI 变量绑定了，但渲染代码没使用
+   → 控件修改了变量值，但渲染逻辑根本不读它
+   → 用户怎么点都没反应（如纹理选择切了但画面不变）
+   ✅ 修复：检查渲染代码是否真的读取了该变量
 ```
 
 ### 🔧 常用场景速查

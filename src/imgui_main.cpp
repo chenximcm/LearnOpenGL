@@ -296,11 +296,38 @@ int main()
         else
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-        // ----- 绑定纹理 -----
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture1);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, texture2);
+        // ----- 绑定纹理（根据 textureMode 选择）-----
+        //
+        // textureMode 由 ImGui RadioButton 实时控制：
+        //   0 = 双纹理混合（container + awesomeface）
+        //   1 = 仅 container
+        //   2 = 仅 awesomeface
+        //
+        if (textureMode == 0)
+        {
+            // 双纹理：两个单元各绑一张不同的纹理
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture1);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, texture2);
+        }
+        else if (textureMode == 1)
+        {
+            // 仅 container：两个单元都绑 container
+            // mix() 混合相同纹理 = 只显示 container
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture1);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, texture1);
+        }
+        else
+        {
+            // 仅 awesomeface：两个单元都绑 awesomeface
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture2);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, texture2);
+        }
 
         // ----- 绘制 3D 场景（矩形） -----
         shader.use();
