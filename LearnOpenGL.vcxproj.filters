@@ -21,6 +21,9 @@
     <ClCompile Include="src\textures_main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="src\transformations_main.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="src\stb_image.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -32,6 +35,20 @@
     <ClInclude Include="src\shader.h">
       <Filter>头文件</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\texture.vert">
+      <Filter>源文件</Filter>
+    </None>
+    <None Include="shaders\texture.frag">
+      <Filter>源文件</Filter>
+    </None>
+    <None Include="shaders\texture_combined.frag">
+      <Filter>源文件</Filter>
+    </None>
+    <None Include="shaders\transform.vert">
+      <Filter>源文件</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll">
