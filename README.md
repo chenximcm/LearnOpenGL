@@ -18,18 +18,32 @@
 
 ```
 LearnOpenGL/
-├── src/                        # 源代码
-│   ├── main.cpp                # Chapter 2-3: Hello Triangle + EBO（当前未启用）
-│   ├── textures_main.cpp       # Chapter 4: 纹理（当前未启用）
-│   ├── transformations_main.cpp# Chapter 5: 变换 + 双纹理（当前未启用）
-│   ├── imgui_main.cpp          # Chapter 6: Dear ImGui 调试界面（当前启动项）
-│   ├── shader.h                # Shader 类（着色器编译/链接/Uniform 封装）
-│   └── stb_image.cpp           # stb_image 实现文件
-├── shaders/                    # GLSL 着色器文件
-│   ├── texture.vert            # 纹理顶点着色器
-│   ├── texture.frag            # 纹理片段着色器（单纹理）
-│   ├── texture_combined.frag   # 纹理片段着色器（双纹理混合）
-│   └── transform.vert          # 变换顶点着色器（含 uniform mat4）
+├── src/                        # 源代码（按功能模块分文件夹）
+│   ├── common/                 # 共享工具
+│   │   ├── shader.h            # Shader 类（着色器编译/链接/Uniform 封装）
+│   │   └── stb_image.cpp       # stb_image 实现文件
+│   ├── triangle/               # Chapter 2-3: Hello Triangle + EBO
+│   │   └── main.cpp            # （当前未启用）
+│   ├── textures/               # Chapter 4: 纹理
+│   │   └── textures_main.cpp   # （当前未启用）
+│   ├── transformations/        # Chapter 5: 变换 + 双纹理
+│   │   └── transformations_main.cpp  # （当前未启用）
+│   ├── imgui/                  # Chapter 6: Dear ImGui 调试界面
+│   │   └── imgui_main.cpp      # （当前未启用）
+│   └── coordinates/            # Chapter 7: 坐标系统（当前启动项）
+│       └── coordinates_main.cpp
+├── shaders/                    # GLSL 着色器文件（按模块分文件夹）
+│   ├── triangle/
+│   │   ├── triangle.vert
+│   │   └── triangle.frag
+│   ├── textures/
+│   │   ├── texture.vert        # 纹理顶点着色器
+│   │   ├── texture.frag        # 纹理片段着色器（单纹理）
+│   │   └── texture_combined.frag # 纹理片段着色器（双纹理混合）
+│   ├── transformations/
+│   │   └── transform.vert      # 变换顶点着色器
+│   └── coordinates/
+│       └── coordinate_system.vert # 坐标系统顶点着色器（MVP）
 ├── textures/                   # 纹理资源
 │   ├── container.jpg           # 容器贴图
 │   └── awesomeface.png         # 笑脸贴图
@@ -53,7 +67,7 @@ LearnOpenGL/
 └── README.md
 ```
 
-> **多文件切换**：不同章节的入口写在对应 `src/*.cpp` 中，通过在 `.vcxproj` 中排除/包含文件来选择当前启动项。当前默认启动 `imgui_main.cpp`。
+> **多文件切换**：不同章节的入口写在对应 `src/*.cpp` 中，通过在 `.vcxproj` 中排除/包含文件来选择当前启动项。当前默认启动 `coordinates_main.cpp`。
 
 ## 学习进度
 
@@ -65,6 +79,7 @@ LearnOpenGL/
 | 2026-06-07 | 纹理 | stb_image 加载图片、纹理坐标、纹理单元、双纹理混合 | `textures_main.cpp` | [笔记](notes/04-纹理-知识点.md) |
 | 2026-06-07 | 变换 | GLM 数学库、平移/旋转/缩放矩阵、矩阵组合顺序、基于时间的动画 | `transformations_main.cpp` | [笔记](notes/05-变换-知识点.md) |
 | 2026-06-07 | Dear ImGui 调试界面 | ImGui 集成、调试控制面板（清屏颜色、线框模式、纹理切换、FPS、变换参数） | `imgui_main.cpp` | [笔记](notes/06-ImGui-知识点.md) |
+| 2026-06-07 | 坐标系统 | 局部→世界→视图→裁剪→屏幕、MVP 矩阵、深度测试、3D 立方体、十个立方体阵列 | `coordinates_main.cpp` | [笔记](notes/07-坐标系统-知识点.md) |
 
 ## 各章节知识点
 
@@ -109,6 +124,17 @@ LearnOpenGL/
   - 变换参数控制（`Slider`）
 - ImGui 渲染管线与事件处理
 
+### Chapter 7: 坐标系统
+- **五个坐标空间**：局部(Local) → 世界(World) → 视图(View) → 裁剪(Clip) → 屏幕(Screen)
+- **三大变换矩阵（MVP）**：
+  - `model` 矩阵：局部 → 世界（每个物体独立）
+  - `view` 矩阵：世界 → 视图（模拟相机，`glm::lookAt`）
+  - `projection` 矩阵：视图 → 裁剪（`glm::perspective` 透视投影）
+- **深度测试**：`glEnable(GL_DEPTH_TEST)` + `glClear(GL_DEPTH_BUFFER_BIT)`
+- **3D 立方体**：24 个顶点 + 36 个索引，6 个面各自独立纹理坐标
+- **十个立方体阵列**：同一份 VAO 数据，不同的 Model 矩阵实现多次绘制
+- **线框模式**：`glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)` 观察 3D 结构
+
 ## 依赖说明
 
 | 库 | 用途 | 集成方式 |
@@ -126,5 +152,6 @@ LearnOpenGL/
 - **2026-06-07**: 纹理章节 —— 集成 stb_image，支持纹理坐标、纹理单元、双纹理混合。
 - **2026-06-07**: 变换章节 —— 集成 GLM 数学库，实现平移/旋转/缩放变换矩阵与实时动画。
 - **2026-06-07**: Dear ImGui 集成 —— 添加 ImGui 依赖，创建实时调试控制面板，修复纹理选择 bug，调整 UI 布局。
+- **2026-06-07**: 坐标系统 —— MVP 矩阵（model/view/projection）、深度测试（Z-buffer）、3D 立方体渲染、十个立方体阵列展示矩阵多样性。
 
 > 📝 每次完成新章节后，在这里更新进度和改动记录。

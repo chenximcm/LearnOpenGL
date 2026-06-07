@@ -13,4 +13,4 @@
  * 正确做法：单独建一个 .cpp，只写这两行。
  */
 #define STB_IMAGE_IMPLEMENTATION
-#include "../vendor/include/stb_image.h"
+#include "../../vendor/include/stb_image.h"

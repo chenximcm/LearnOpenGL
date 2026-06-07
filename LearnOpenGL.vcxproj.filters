@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="源文件">
@@ -13,67 +13,99 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <!-- ===== src 模块文件夹（嵌套在 源文件 下） ===== -->
+    <Filter Include="源文件\common">
+      <UniqueIdentifier>{f6a7b8c9-d0e1-2345-fabc-456789012345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="源文件\imgui">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-imgu-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="源文件\imgui\backends">
+      <UniqueIdentifier>{b2c3d4e5-f6a7-8901-imgu-f12345678901}</UniqueIdentifier>
+    </Filter>
+    <!-- ===== shaders 模块文件夹（嵌套在 资源文件 下） ===== -->
+    <Filter Include="资源文件\triangle">
+      <UniqueIdentifier>{b8c9d0e1-f2a3-4567-bcde-678901234567}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\textures">
+      <UniqueIdentifier>{c9d0e1f2-a3b4-5678-cdef-789012345678}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\transformations">
+      <UniqueIdentifier>{d0e1f2a3-b4c5-6789-defa-890123456789}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\coordinates">
+      <UniqueIdentifier>{e1f2a3b4-c5d6-7890-efab-901234567890}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
+
+  <!-- ======================== ClCompile ======================== -->
   <ItemGroup>
     <ClCompile Include="src\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="src\textures_main.cpp">
-      <Filter>源文件</Filter>
+    <ClCompile Include="src\common\stb_image.cpp">
+      <Filter>源文件\common</Filter>
     </ClCompile>
-    <ClCompile Include="src\transformations_main.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="src\imgui_main.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="src\stb_image.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
+    <!-- vendor -->
     <ClCompile Include="vendor\include\GLAD\glad.c">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\imgui.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\imgui_demo.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\imgui_draw.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\imgui_tables.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\imgui_widgets.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\backends\imgui_impl_glfw.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui\backends</Filter>
     </ClCompile>
     <ClCompile Include="vendor\imgui\backends\imgui_impl_opengl3.cpp">
-      <Filter>源文件</Filter>
+      <Filter>源文件\imgui\backends</Filter>
     </ClCompile>
   </ItemGroup>
+
+  <!-- ======================== ClInclude ======================== -->
   <ItemGroup>
-    <ClInclude Include="src\shader.h">
-      <Filter>头文件</Filter>
+    <ClInclude Include="src\common\shader.h">
+      <Filter>源文件\common</Filter>
     </ClInclude>
   </ItemGroup>
+
+  <!-- ======================== None (shaders) ======================== -->
   <ItemGroup>
-    <None Include="shaders\texture.vert">
-      <Filter>源文件</Filter>
+    <None Include="shaders\triangle\triangle.vert">
+      <Filter>资源文件\triangle</Filter>
     </None>
-    <None Include="shaders\texture.frag">
-      <Filter>源文件</Filter>
+    <None Include="shaders\triangle\triangle.frag">
+      <Filter>资源文件\triangle</Filter>
     </None>
-    <None Include="shaders\texture_combined.frag">
-      <Filter>源文件</Filter>
+    <None Include="shaders\textures\texture.vert">
+      <Filter>资源文件\textures</Filter>
     </None>
-    <None Include="shaders\transform.vert">
-      <Filter>源文件</Filter>
+    <None Include="shaders\textures\texture.frag">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="shaders\textures\texture_combined.frag">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="shaders\transformations\transform.vert">
+      <Filter>资源文件\transformations</Filter>
+    </None>
+    <None Include="shaders\coordinates\coordinate_system.vert">
+      <Filter>资源文件\coordinates</Filter>
     </None>
   </ItemGroup>
+
+  <!-- ======================== dll ======================== -->
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll">
       <Filter>资源文件</Filter>

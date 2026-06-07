@@ -3,6 +3,10 @@
 
 #include <glad/glad.h>
 
+// GLM 用于 mat4 类型（setMat4 方法需要）
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -224,6 +228,36 @@ public:
     void setVec4(const std::string& name, float x, float y, float z, float w) const
     {
         glUniform4f(glGetUniformLocation(ID, name.c_str()), x, y, z, w);
+    }
+
+    /**
+     * 设置 GLSL 中的 mat4 类型 uniform
+     *
+     * 这是坐标系统和后续章节中最常用的方法。
+     * 用于传递 model / view / projection 变换矩阵。
+     *
+     * GLSL 对应：
+     *   uniform mat4 model;
+     *   uniform mat4 view;
+     *   uniform mat4 projection;
+     *
+     * 使用示例 —— 在渲染循环中设置 MVP 矩阵：
+     *   shader.setMat4("model", modelMatrix);
+     *   shader.setMat4("view", viewMatrix);
+     *   shader.setMat4("projection", projMatrix);
+     *
+     * 内部调用 glUniformMatrix4fv：
+     *   - count = 1（一个矩阵）
+     *   - transpose = GL_FALSE（GLM 使用列主序，OpenGL 也使用列主序，
+     *     不需要转置。如果使用行主序库才需要转置）
+     *   - value = glm::value_ptr(mat) 获取矩阵的裸指针（16 个 float）
+     *
+     * @param name uniform 变量名
+     * @param mat  glm::mat4 矩阵（列主序）
+     */
+    void setMat4(const std::string& name, const glm::mat4& mat) const
+    {
+        glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(mat));
     }
 
 private:

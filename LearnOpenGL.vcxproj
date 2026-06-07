@@ -153,20 +153,8 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="src\main.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="src\textures_main.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="src\transformations_main.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="src\imgui_main.cpp" />
-    <ClCompile Include="src\stb_image.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\common\stb_image.cpp" />
     <ClCompile Include="vendor\include\GLAD\glad.c" />
     <ClCompile Include="vendor\imgui\imgui.cpp" />
     <ClCompile Include="vendor\imgui\imgui_demo.cpp" />
@@ -177,13 +165,16 @@
     <ClCompile Include="vendor\imgui\backends\imgui_impl_opengl3.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\shader.h" />
+    <ClInclude Include="src\common\shader.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\texture.vert" />
-    <None Include="shaders\texture.frag" />
-    <None Include="shaders\texture_combined.frag" />
-    <None Include="shaders\transform.vert" />
+    <None Include="shaders\triangle\triangle.vert" />
+    <None Include="shaders\triangle\triangle.frag" />
+    <None Include="shaders\textures\texture.vert" />
+    <None Include="shaders\textures\texture.frag" />
+    <None Include="shaders\textures\texture_combined.frag" />
+    <None Include="shaders\transformations\transform.vert" />
+    <None Include="shaders\coordinates\coordinate_system.vert" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />
