@@ -153,11 +153,21 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\main.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="src\textures_main.cpp" />
+    <ClCompile Include="src\stb_image.cpp" />
     <ClCompile Include="vendor\include\GLAD\glad.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\shader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\texture.vert" />
+    <None Include="shaders\texture.frag" />
+    <None Include="shaders\texture_combined.frag" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />

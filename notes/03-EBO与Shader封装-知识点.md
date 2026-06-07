@@ -600,7 +600,7 @@ glDrawElements(GL_TRIANGLES, count, GL_UNSIGNED_INT, 0)
 
 > **📝 学习日期**：2026-06-06 | **上一个章节**：[Hello Triangle](02-Hello-Triangle-知识点.md)
 >
-> **下一个章节**：着色器（Shaders）— 深入学习 GLSL、uniform、属性插值、多属性顶点数据
+> **下一个章节**：[纹理（Textures）](04-纹理-知识点.md) — 纹理坐标、纹理参数、纹理单元、图片加载
 
 <style>
 .codehilite { color: #d4d4d4; }
