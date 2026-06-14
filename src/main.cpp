@@ -997,11 +997,385 @@ int runCameraDemo()
 
 
 // ================================================================
+// 光照 / 颜色（Colors）
+// ================================================================
+
+int runColorsDemo()
+{
+    const unsigned int SCR_WIDTH  = 800;
+    const unsigned int SCR_HEIGHT = 600;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Colors | Light × Object = Perceived Color", NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 启用深度测试 ==========
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 4. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 5. 编译着色器 ==========
+    //
+    // lightingShader — 用于渲染被光照的物体（主立方体）
+    //   复用坐标系统的顶点着色器（带 MVP 和纹理坐标）
+    //   使用自定义的 colors.frag 进行颜色计算
+    //
+    // lightCubeShader — 用于渲染代表光源的小立方体
+    //   简单的顶点着色器（只有 MVP）+ 纯色片段着色器
+    //
+    Shader lightingShader("shaders/coordinates/coordinate_system.vert",
+                          "shaders/lighting/colors.frag", true);
+    Shader lightCubeShader("shaders/lighting/light_cube.vert",
+                           "shaders/lighting/light_cube.frag", true);
+
+    // ========== 6. 立方体顶点数据（含纹理坐标，复用坐标系统章节的数据） ==========
+    float vertices[] = {
+        // ---- 位置 (xyz) ----    ---- 纹理坐标 (uv) ---
+        // ============ 背面 (Z- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+        // ============ 正面 (Z+ 方向) ============
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 左面 (X- 方向) ============
+        -0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,        1.0f, 1.0f,
+        // ============ 右面 (X+ 方向) ============
+         0.5f,  0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 底面 (Y- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+        // ============ 顶面 (Y+ 方向) ============
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 0.0f
+    };
+
+    unsigned int indices[] = {
+         0,  1,  2,    2,  3,  0,   // 背面
+         4,  5,  6,    6,  7,  4,   // 正面
+         8,  9, 10,   10, 11,  8,   // 左面
+        12, 13, 14,   14, 15, 12,   // 右面
+        16, 17, 18,   18, 19, 16,   // 底面
+        20, 21, 22,   22, 23, 20    // 顶面
+    };
+
+    // ========== 7. 创建 VAO / VBO / EBO ==========
+    //
+    // 主物体（被光照的立方体）：
+    //   需要位置 + 纹理坐标两个属性
+    //
+    unsigned int cubeVAO, VBO, EBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(cubeVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    // 位置属性 (location = 0)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // 纹理坐标属性 (location = 1)
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 光源立方体的 VAO（复用 VBO/EBO） ==========
+    //
+    // 重要概念：两个 VAO 共享同一份 VBO 数据。
+    // 不同之处在于 lightVAO 只需要位置属性（location = 0），
+    // 不需要纹理坐标属性，因为 light_cube.vert 只有 aPos 输入。
+    //
+    unsigned int lightVAO;
+    glGenVertexArrays(1, &lightVAO);
+    glBindVertexArray(lightVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);   // 复用 VBO
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);  // 复用 EBO
+
+    // 只启用位置属性（光源着色器只需要位置）
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
+
+    // ========== 9. 加载纹理 ==========
+    unsigned int texture1 = loadTexture("textures/container.jpg");
+
+    // ========== 10. 用户控制参数 ==========
+    // ---- 颜色相关 ----
+    glm::vec3 lightColor  = glm::vec3(1.0f);          // 光源颜色（默认白色）
+    glm::vec3 objectColor = glm::vec3(1.0f, 0.5f, 0.31f);  // 物体颜色（默认珊瑚色）
+    float lightColorArray[3]  = { 1.0f, 1.0f, 1.0f };
+    float objectColorArray[3] = { 1.0f, 0.5f, 0.31f };
+
+    // ---- 光源位置 ----
+    glm::vec3 lightPos = glm::vec3(1.2f, 1.0f, 2.0f);
+    float lightPosArray[3] = { 1.2f, 1.0f, 2.0f };
+
+    // ---- 摄像机控制 ----
+    glm::vec3 camPos   = glm::vec3(0.0f, 0.0f, 5.0f);
+    float     fov      = 45.0f;
+    float     camMoveSpeed = 0.08f;
+
+    // ---- 调试 ----
+    bool showDebugPanel = true;
+    bool useTexture     = true;   // 是否在主立方体上使用纹理
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 11. 设置纹理单元 ==========
+    lightingShader.use();
+    lightingShader.setInt("texture1", 0);
+
+    // ========== 12. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 13. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  颜色（Colors）—— 光照的基础" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  核心公式: Perceived = Light × Object" << std::endl;
+    std::cout << "  ESC       → 退出" << std::endl;
+    std::cout << "  A/D  ←/→  → 左右移动摄像机" << std::endl;
+    std::cout << "  W/S  ↑/↓  → 上下移动摄像机" << std::endl;
+    std::cout << "  Tab       → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 14. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 14a. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // Tab：切换 ImGui 面板
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        // WASD / 方向键：摄像机移动
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+
+        // ===== 14b. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 14c. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 14d. 构建 MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染主物体（被光照的立方体）
+        // ================================================================
+
+        lightingShader.use();
+
+        // 设置 MVP 矩阵
+        glm::mat4 model = glm::mat4(1.0f);
+        lightingShader.setMat4("projection", projection);
+        lightingShader.setMat4("view", view);
+        lightingShader.setMat4("model", model);
+
+        // ★★★ 核心：设置颜色 uniform ★★★
+        //
+        // 片段着色器 colors.frag 中计算：
+        //   vec3 result = lightColor * objectColor;
+        //
+        // 改变这两个值就能观察到不同颜色的光照效果。
+        //
+        lightingShader.setVec3("lightColor",  lightColor.x,  lightColor.y,  lightColor.z);
+        lightingShader.setVec3("objectColor", objectColor.x, objectColor.y, objectColor.z);
+
+        // 可选：绑定纹理到主立方体
+        if (useTexture)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture1);
+        }
+
+        glBindVertexArray(cubeVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ================================================================
+        // 第二部分：渲染光源表示（小立方体标记光源位置）
+        // ================================================================
+        //
+        // 与主物体的区别：
+        //   - 使用不同的着色器（lightCubeShader）
+        //   - 模型矩阵缩小到 0.2（表示它是一个「点光源」标记）
+        //   - 位置固定在 lightPos
+        //   - 颜色 = lightColor（看起来像它在发光）
+        //
+
+        lightCubeShader.use();
+        lightCubeShader.setMat4("projection", projection);
+        lightCubeShader.setMat4("view", view);
+
+        model = glm::mat4(1.0f);
+        model = glm::translate(model, lightPos);
+        model = glm::scale(model, glm::vec3(0.2f));  // 让光源立方体小一点
+        lightCubeShader.setMat4("model", model);
+
+        lightCubeShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
+
+        glBindVertexArray(lightVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ===== 14e. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Colors");
+
+            // ---- 性能信息 ----
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 颜色控制（核心） ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Colors");
+            ImGui::Text("Perceived = Light × Object");
+
+            ImGui::ColorEdit3("Light Color",  lightColorArray);
+            ImGui::ColorEdit3("Object Color", objectColorArray);
+
+            // 同步颜色数组到 glm::vec3
+            lightColor  = glm::vec3(lightColorArray[0],  lightColorArray[1],  lightColorArray[2]);
+            objectColor = glm::vec3(objectColorArray[0], objectColorArray[1], objectColorArray[2]);
+
+            // ---- 计算结果预览 ----
+            glm::vec3 result = lightColor * objectColor;
+            float resultArray[3] = { result.r, result.g, result.b };
+            ImGui::Text("Result (Light × Object):");
+            ImGui::ColorEdit3("##Result", resultArray, ImGuiColorEditFlags_NoInputs);
+
+            ImGui::Text("  R = %.2f × %.2f = %.2f", lightColor.r, objectColor.r, result.r);
+            ImGui::Text("  G = %.2f × %.2f = %.2f", lightColor.g, objectColor.g, result.g);
+            ImGui::Text("  B = %.2f × %.2f = %.2f", lightColor.b, objectColor.b, result.b);
+            ImGui::Separator();
+
+            // ---- 光源位置 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Light Position");
+            ImGui::SliderFloat("Light X", &lightPosArray[0], -3.0f, 3.0f, "%.1f");
+            ImGui::SliderFloat("Light Y", &lightPosArray[1], -3.0f, 3.0f, "%.1f");
+            ImGui::SliderFloat("Light Z", &lightPosArray[2], -5.0f, 5.0f, "%.1f");
+            lightPos = glm::vec3(lightPosArray[0], lightPosArray[1], lightPosArray[2]);
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &camMoveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            // ---- 选项 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Options");
+            ImGui::Checkbox("Use Texture", &useTexture);
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled("WASD/Arrows: Move Camera  |  Tab: Panel  |  ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 14f. ImGui：渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // ===== 14g. 交换缓冲 + 事件处理 =====
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 15. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &lightVAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+    glDeleteTextures(1, &texture1);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：摄像机（Camera）" << std::endl;
-    return runCameraDemo();
+    std::cout << "▶ 运行最新章节：光照/颜色（Colors）" << std::endl;
+    return runColorsDemo();
 }
