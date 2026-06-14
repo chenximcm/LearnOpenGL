@@ -1805,11 +1805,467 @@ int runBasicLightingDemo()
 
 
 // ================================================================
+// 材质（Materials）— 分离 Material 与 Light 属性
+// ================================================================
+//
+// 基础光照章节使用全局系数控制 Phong 模型：
+//   result = (ambient + diffuse + specular) × objectColor
+//
+// 材质章节引入两个结构体，让控制更精细：
+//
+//   Material { ambient, diffuse, specular, shininess }
+//     定义物体如何反射光线——每种反射分量可以有独立的颜色
+//
+//   Light { position, ambient, diffuse, specular }
+//     定义光源的属性——环境光、漫反射光、镜面反射光可以不同颜色
+//
+// 材质不同，物体呈现的视觉效果截然不同。
+// 本 Demo 内置了 10 种常见材质预设（金、银、青铜、铜、红塑料等）。
+//
+
+int runMaterialsDemo()
+{
+    const unsigned int SCR_WIDTH  = 800;
+    const unsigned int SCR_HEIGHT = 600;
+
+    // ========== 1. 材质预设数据 ==========
+    //
+    // 每个材质包含四个属性：
+    //   ambient  — 环境光反射颜色（物体本身在暗处的颜色）
+    //   diffuse  — 漫反射反射颜色（物体在光照下的主色）
+    //   specular — 镜面反射反射颜色（高光的颜色）
+    //   shininess — 反光度
+    //
+    struct MaterialPreset {
+        glm::vec3 ambient;
+        glm::vec3 diffuse;
+        glm::vec3 specular;
+        float shininess;
+        const char* name;
+    };
+
+    const int NUM_MATERIALS = 10;
+    const MaterialPreset MATERIALS[NUM_MATERIALS] = {
+        // 金 — 亮黄色，强金色高光，高反光
+        { {0.247f, 0.224f, 0.064f}, {0.752f, 0.606f, 0.226f}, {0.628f, 0.556f, 0.366f}, 51.2f, "Gold" },
+        // 银 — 灰白色，白色高光，高反光
+        { {0.192f, 0.192f, 0.192f}, {0.507f, 0.507f, 0.507f}, {0.508f, 0.508f, 0.508f}, 51.2f, "Silver" },
+        // 青铜 — 暖棕色，暖色高光
+        { {0.212f, 0.127f, 0.054f}, {0.714f, 0.428f, 0.181f}, {0.394f, 0.272f, 0.167f}, 25.6f, "Bronze" },
+        // 铜 — 红棕色，暖色高光，范围较大
+        { {0.192f, 0.073f, 0.032f}, {0.703f, 0.270f, 0.083f}, {0.257f, 0.138f, 0.086f}, 12.8f, "Copper" },
+        // 红塑料 — 无环境色，鲜红漫反射，白色高光
+        { {0.000f, 0.000f, 0.000f}, {0.500f, 0.000f, 0.000f}, {0.700f, 0.600f, 0.600f}, 32.0f, "Red Plastic" },
+        // 青橡胶 — 无环境色，暗青漫反射，很弱的高光
+        { {0.000f, 0.000f, 0.000f}, {0.010f, 0.360f, 0.370f}, {0.220f, 0.430f, 0.460f}, 12.8f, "Cyan Rubber" },
+        // 翡翠 — 深绿，亮绿漫反射，淡绿高光，高反光
+        { {0.022f, 0.174f, 0.022f}, {0.076f, 0.614f, 0.075f}, {0.633f, 0.727f, 0.633f}, 76.8f, "Emerald" },
+        // 黑曜石 — 深紫黑，暗紫漫反射，亮紫高光
+        { {0.054f, 0.050f, 0.066f}, {0.183f, 0.171f, 0.225f}, {0.333f, 0.333f, 0.521f}, 38.4f, "Obsidian" },
+        // 珍珠 — 暖粉色，浅粉漫反射，柔和白色高光
+        { {0.250f, 0.207f, 0.207f}, {1.000f, 0.829f, 0.829f}, {0.297f, 0.297f, 0.297f}, 11.3f, "Pearl" },
+        // 红宝石 — 深红，亮红漫反射，亮粉高光，高反光
+        { {0.175f, 0.012f, 0.012f}, {0.614f, 0.041f, 0.041f}, {0.727f, 0.627f, 0.627f}, 76.8f, "Ruby" },
+    };
+
+    // 当前材质属性（初始为 Gold）
+    int currentMaterial = 0;
+    glm::vec3 matAmbient   = MATERIALS[0].ambient;
+    glm::vec3 matDiffuse   = MATERIALS[0].diffuse;
+    glm::vec3 matSpecular  = MATERIALS[0].specular;
+    float     matShininess = MATERIALS[0].shininess;
+
+    // 当前材质颜色数组（用于 ImGui ColorEdit3）
+    float matAmbientArray[3]   = { matAmbient.r,   matAmbient.g,   matAmbient.b   };
+    float matDiffuseArray[3]   = { matDiffuse.r,   matDiffuse.g,   matDiffuse.b   };
+    float matSpecularArray[3]  = { matSpecular.r,  matSpecular.g,  matSpecular.b  };
+
+    // ========== 2. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Materials | 10 material presets with editable Light properties",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 3. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 4. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 5. 编译着色器 ==========
+    //
+    // lightingShader — 使用 materials.frag（Material + Light 结构体）
+    //   顶点着色器复用 basic_lighting.vert（位置 + 法线 + 纹理坐标）
+    //
+    Shader lightingShader("shaders/lighting/basic_lighting.vert",
+                          "shaders/lighting/materials.frag", true);
+    Shader lightCubeShader("shaders/lighting/light_cube.vert",
+                           "shaders/lighting/light_cube.frag", true);
+
+    // ========== 6. 顶点数据（与基础光照章节相同） ==========
+    float vertices[] = {
+        // ============ 背面 (Z-) ============
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+        // ============ 正面 (Z+) ============
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
+        // ============ 左面 (X-) ============
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+        // ============ 右面 (X+) ============
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        // ============ 底面 (Y-) ============
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+        // ============ 顶面 (Y+) ============
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f
+    };
+    unsigned int indices[] = {
+         0,  1,  2,    2,  3,  0,
+         4,  5,  6,    6,  7,  4,
+         8,  9, 10,   10, 11,  8,
+        12, 13, 14,   14, 15, 12,
+        16, 17, 18,   18, 19, 16,
+        20, 21, 22,   22, 23, 20
+    };
+
+    // ========== 7. VAO / VBO / EBO ==========
+    unsigned int cubeVAO, lightVAO, VBO, EBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenVertexArrays(1, &lightVAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    // cubeVAO：主物体（位置 + 法线 + 纹理坐标）
+    glBindVertexArray(cubeVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // lightVAO：光源标记（只取位置）
+    glBindVertexArray(lightVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // ========== 8. 用户控制参数 ==========
+
+    // ---- 光源 ----
+    glm::vec3 lightPos   = glm::vec3(1.2f, 1.0f, 2.0f);
+    float lightPosArray[3] = { 1.2f, 1.0f, 2.0f };
+
+    // 光源的三种分量可以有不同的颜色
+    // ambient  通常很暗（模拟环境光）
+    // diffuse  通常最亮（光源的主色）
+    // specular 通常较亮（高光颜色）
+    glm::vec3 lightAmbient  = glm::vec3(0.2f, 0.2f, 0.2f);   // 微弱白光
+    glm::vec3 lightDiffuse  = glm::vec3(0.8f, 0.8f, 0.8f);   // 亮白光
+    glm::vec3 lightSpecular = glm::vec3(1.0f, 1.0f, 1.0f);   // 纯白高光
+
+    float lightAmbientArray[3]  = { 0.2f, 0.2f, 0.2f };
+    float lightDiffuseArray[3]  = { 0.8f, 0.8f, 0.8f };
+    float lightSpecularArray[3] = { 1.0f, 1.0f, 1.0f };
+
+    bool lightAutoRotate = false;
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos    = glm::vec3(0.0f, 0.0f, 5.0f);
+    float     fov       = 45.0f;
+    float camMoveSpeed  = 0.08f;
+
+    // ---- 调试 ----
+    bool showDebugPanel = true;
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 9. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 10. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  材质（Materials）— 10 种材质预设" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  核心概念: Material vs Light 结构体" << std::endl;
+    std::cout << "  ESC       → 退出" << std::endl;
+    std::cout << "  WASD/箭头 → 摄像机移动" << std::endl;
+    std::cout << "  Tab       → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 11. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 11a. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+
+        // ===== 11b. 光源自动旋转 =====
+        if (lightAutoRotate)
+        {
+            float radius = glm::length(lightPos);
+            float angle  = (float)glfwGetTime() * 0.8f;
+            lightPos.x = cos(angle) * radius;
+            lightPos.z = sin(angle) * radius;
+            lightPosArray[0] = lightPos.x;
+            lightPosArray[1] = lightPos.y;
+            lightPosArray[2] = lightPos.z;
+        }
+
+        // ===== 11c. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 11d. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 11e. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染主物体（应用材质）
+        // ================================================================
+
+        lightingShader.use();
+
+        // ---- MVP ----
+        glm::mat4 model = glm::mat4(1.0f);
+        lightingShader.setMat4("projection", projection);
+        lightingShader.setMat4("view", view);
+        lightingShader.setMat4("model", model);
+
+        // ---- 设置材质 uniform（结构体成员用点号访问） ----
+        lightingShader.setVec3("material.ambient",   matAmbient.r,  matAmbient.g,  matAmbient.b);
+        lightingShader.setVec3("material.diffuse",   matDiffuse.r,  matDiffuse.g,  matDiffuse.b);
+        lightingShader.setVec3("material.specular",  matSpecular.r, matSpecular.g, matSpecular.b);
+        lightingShader.setFloat("material.shininess", matShininess);
+
+        // ---- 设置光源 uniform（结构体成员用点号访问） ----
+        lightingShader.setVec3("light.position",  lightPos.x, lightPos.y, lightPos.z);
+        lightingShader.setVec3("light.ambient",   lightAmbient.r,  lightAmbient.g,  lightAmbient.b);
+        lightingShader.setVec3("light.diffuse",   lightDiffuse.r,  lightDiffuse.g,  lightDiffuse.b);
+        lightingShader.setVec3("light.specular",  lightSpecular.r, lightSpecular.g, lightSpecular.b);
+
+        // ---- 摄像机位置（用于镜面反射的视线方向） ----
+        lightingShader.setVec3("viewPos", camPos.x, camPos.y, camPos.z);
+
+        glBindVertexArray(cubeVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ================================================================
+        // 第二部分：渲染光源标记
+        // ================================================================
+
+        lightCubeShader.use();
+        lightCubeShader.setMat4("projection", projection);
+        lightCubeShader.setMat4("view", view);
+
+        model = glm::mat4(1.0f);
+        model = glm::translate(model, lightPos);
+        model = glm::scale(model, glm::vec3(0.2f));
+        lightCubeShader.setMat4("model", model);
+        // 光源标记的颜色使用 light.diffuse（最接近光源的「主色」）
+        lightCubeShader.setVec3("lightColor", lightDiffuse.r, lightDiffuse.g, lightDiffuse.b);
+
+        glBindVertexArray(lightVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ===== 11f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Materials");
+
+            // ---- 性能 ----
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 材质选择 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Material");
+
+            // 材质预设下拉框
+            // 构造预设名称列表（用 \0 分隔）
+            // 选中的项写入 currentMaterial，然后更新材质属性
+            {
+                char comboItems[256] = {};
+                int offset = 0;
+                for (int i = 0; i < NUM_MATERIALS; i++)
+                {
+                    const char* name = MATERIALS[i].name;
+                    for (const char* c = name; *c; c++)
+                        comboItems[offset++] = *c;
+                    comboItems[offset++] = '\0';
+                }
+                comboItems[offset] = '\0';
+
+                int prevMaterial = currentMaterial;
+                ImGui::Combo("Preset", &currentMaterial, comboItems);
+                if (currentMaterial != prevMaterial)
+                {
+                    matAmbient   = MATERIALS[currentMaterial].ambient;
+                    matDiffuse   = MATERIALS[currentMaterial].diffuse;
+                    matSpecular  = MATERIALS[currentMaterial].specular;
+                    matShininess = MATERIALS[currentMaterial].shininess;
+                    matAmbientArray[0]  = matAmbient.r;  matAmbientArray[1]  = matAmbient.g;  matAmbientArray[2]  = matAmbient.b;
+                    matDiffuseArray[0]  = matDiffuse.r;  matDiffuseArray[1]  = matDiffuse.g;  matDiffuseArray[2]  = matDiffuse.b;
+                    matSpecularArray[0] = matSpecular.r; matSpecularArray[1] = matSpecular.g; matSpecularArray[2] = matSpecular.b;
+                }
+            }
+
+            // ---- 材质属性编辑 ----
+            ImGui::Text("Material Properties:");
+            bool matEdited = false;
+            matEdited |= ImGui::ColorEdit3("Ambient",  matAmbientArray);
+            matEdited |= ImGui::ColorEdit3("Diffuse",  matDiffuseArray);
+            matEdited |= ImGui::ColorEdit3("Specular", matSpecularArray);
+            matEdited |= ImGui::SliderFloat("Shininess", &matShininess, 1.0f, 256.0f, "%.1f");
+            if (matEdited)
+            {
+                matAmbient  = glm::vec3(matAmbientArray[0],  matAmbientArray[1],  matAmbientArray[2]);
+                matDiffuse  = glm::vec3(matDiffuseArray[0],  matDiffuseArray[1],  matDiffuseArray[2]);
+                matSpecular = glm::vec3(matSpecularArray[0], matSpecularArray[1], matSpecularArray[2]);
+            }
+
+            // 显示材质预览
+            ImGui::Separator();
+            ImGui::Text("Preview:");
+            ImGui::ColorButton("Ambient",  ImVec4(matAmbient.r,  matAmbient.g,  matAmbient.b,  1.0f), 0, ImVec2(40, 20));
+            ImGui::SameLine(); ImGui::Text(" Ambient");
+            ImGui::ColorButton("Diffuse",  ImVec4(matDiffuse.r,  matDiffuse.g,  matDiffuse.b,  1.0f), 0, ImVec2(40, 20));
+            ImGui::SameLine(); ImGui::Text(" Diffuse");
+            ImGui::ColorButton("Specular", ImVec4(matSpecular.r, matSpecular.g, matSpecular.b, 1.0f), 0, ImVec2(40, 20));
+            ImGui::SameLine(); ImGui::Text(" Specular  Shininess: %.0f", matShininess);
+
+            ImGui::Separator();
+
+            // ---- 光源属性 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Light Properties");
+            ImGui::SliderFloat3("Position", lightPosArray, -4.0f, 4.0f, "%.1f");
+            lightPos = glm::vec3(lightPosArray[0], lightPosArray[1], lightPosArray[2]);
+            ImGui::Checkbox("Auto Rotate", &lightAutoRotate);
+
+            ImGui::ColorEdit3("Ambient",  lightAmbientArray);
+            ImGui::ColorEdit3("Diffuse",  lightDiffuseArray);
+            ImGui::ColorEdit3("Specular", lightSpecularArray);
+            lightAmbient  = glm::vec3(lightAmbientArray[0],  lightAmbientArray[1],  lightAmbientArray[2]);
+            lightDiffuse  = glm::vec3(lightDiffuseArray[0],  lightDiffuseArray[1],  lightDiffuseArray[2]);
+            lightSpecular = glm::vec3(lightSpecularArray[0], lightSpecularArray[1], lightSpecularArray[2]);
+
+            ImGui::Separator();
+
+            // ---- 选项 ----
+            ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.4f, 1.0f), "Options");
+            ImGui::SliderFloat("Camera Speed", &camMoveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled("WASD/Arrows: Move  |  Tab: Panel  |  ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 11g. ImGui：渲染 + 交换缓冲 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 12. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &lightVAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：基础光照（Basic Lighting）" << std::endl;
-    return runBasicLightingDemo();
+    std::cout << "▶ 运行最新章节：材质（Materials）" << std::endl;
+    return runMaterialsDemo();
 }
