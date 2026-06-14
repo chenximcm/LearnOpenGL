@@ -2642,11 +2642,460 @@ int runLightingMapsDemo()
 
 
 // ================================================================
+// 投光物（Light Casters）— 方向光 / 点光源 / 聚光灯
+// ================================================================
+//
+// 三种光源类型的区别：
+//
+//   方向光（Directional Light）
+//     光线平行，全场景光照均匀，无衰减。
+//     模拟太阳光。用 direction 定义方向。
+//
+//   点光源（Point Light）
+//     从一点向所有方向发光，有距离衰减。
+//     模拟灯泡。用 position + 衰减系数定义。
+//
+//   聚光灯（Spotlight）
+//     锥体光照，从一点向特定方向发光。
+//     模拟手电筒。用 position + direction + cutOff 定义。
+//
+// 本 Demo 用 10 个立方体展示不同光源类型的效果差异。
+//
+
+int runLightCastersDemo()
+{
+    const unsigned int SCR_WIDTH  = 800;
+    const unsigned int SCR_HEIGHT = 600;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Light Casters | 0:Dir 1:Point 2:Spot", NULL, NULL);
+    if (window == NULL) { glfwTerminate(); return -1; }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return -1;
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 3. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 4. 编译着色器 ==========
+    Shader lightingShader("shaders/lighting/basic_lighting.vert",
+                          "shaders/lighting/light_casters.frag", true);
+    Shader lightCubeShader("shaders/lighting/light_cube.vert",
+                           "shaders/lighting/light_cube.frag", true);
+
+    // ========== 5. 顶点数据 ==========
+    float vertices[] = {
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f
+    };
+    unsigned int indices[] = {
+         0,  1,  2,    2,  3,  0,    4,  5,  6,    6,  7,  4,
+         8,  9, 10,   10, 11,  8,   12, 13, 14,   14, 15, 12,
+        16, 17, 18,   18, 19, 16,   20, 21, 22,   22, 23, 20
+    };
+
+    // ========== 6. VAO / VBO / EBO ==========
+    unsigned int cubeVAO, lightVAO, VBO, EBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenVertexArrays(1, &lightVAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    glBindVertexArray(lightVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    // ========== 7. 加载纹理 ==========
+    unsigned int diffuseMap  = loadTexture("textures/container2.png");
+    unsigned int specularMap = loadTexture("textures/container2_specular.png");
+
+    // ========== 8. 设置纹理单元 ==========
+    lightingShader.use();
+    lightingShader.setInt("material.diffuse",  0);
+    lightingShader.setInt("material.specular", 1);
+
+    // ========== 9. 立方体位置（10 个，展示距离衰减效果） ==========
+    glm::vec3 cubePositions[] = {
+        glm::vec3( 0.0f,  0.0f,  0.0f),
+        glm::vec3( 2.0f,  0.5f,  0.0f),
+        glm::vec3(-2.0f,  0.5f,  0.0f),
+        glm::vec3( 0.0f,  2.0f,  0.0f),
+        glm::vec3( 0.0f, -2.0f,  0.0f),
+        glm::vec3( 3.0f,  1.5f, -2.0f),
+        glm::vec3(-3.0f,  1.5f, -2.0f),
+        glm::vec3( 1.5f, -1.5f, -3.0f),
+        glm::vec3(-1.5f, -1.5f, -3.0f),
+        glm::vec3( 0.0f,  0.0f, -4.0f)
+    };
+    const int NUM_CUBES = sizeof(cubePositions) / sizeof(cubePositions[0]);
+
+    // ========== 10. 用户控制参数 ==========
+
+    // ---- 光源类型 ----
+    // 0 = Directional Light
+    // 1 = Point Light
+    // 2 = Spotlight
+    // ★ 默认用点光源，一启动就能看到高光效果
+    int lightType = 1;
+
+    // ---- 光源颜色（三种类型共用） ----
+    glm::vec3 lightAmbient  = glm::vec3(0.15f, 0.15f, 0.15f);
+    glm::vec3 lightDiffuse  = glm::vec3(0.8f, 0.8f, 0.8f);
+    glm::vec3 lightSpecular = glm::vec3(1.0f, 1.0f, 1.0f);
+    float lightAmbientArray[3]  = { 0.15f, 0.15f, 0.15f };
+    float lightDiffuseArray[3]  = { 0.8f,  0.8f,  0.8f  };
+    float lightSpecularArray[3] = { 1.0f,  1.0f,  1.0f  };
+
+    // ---- 方向光 / 聚光灯：方向 ----
+    // 默认从右上往前照，让前面和顶面都能被照亮
+    glm::vec3 lightDirection   = glm::vec3(-0.3f, -0.5f, -0.8f);
+    float lightDirArray[3]     = { -0.3f, -0.5f, -0.8f };
+
+    // ---- 点光源 / 聚光灯：位置 + 衰减 ----
+    // 放在物体右前方，让 specular 高光清晰可见
+    glm::vec3 lightPos   = glm::vec3(1.5f, 1.0f, 2.0f);
+    float lightPosArray[3] = { 1.5f, 1.0f, 2.0f };
+
+    // 衰减系数（适用于距离 ~32 的范围）
+    float attenuationConstant  = 1.0f;
+    float attenuationLinear    = 0.14f;
+    float attenuationQuadratic = 0.07f;
+
+    // ---- 聚光灯：锥体角度（角度制，着色器中转余弦） ----
+    float cutOffDeg      = 12.5f;   // 内锥角
+    float outerCutOffDeg = 17.5f;   // 外锥角
+
+    // ---- 材质 ----
+    float shininess = 64.0f;
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos    = glm::vec3(0.0f, 0.0f, 6.0f);
+    float     fov       = 45.0f;
+    float     camMoveSpeed = 0.10f;
+
+    // ---- 调试 ----
+    bool showDebugPanel = true;
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+    bool lightAutoRotate = false;
+
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 11. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  投光物（Light Casters）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  默认: 点光源（一启动即可见高光）" << std::endl;
+    std::cout << "  0: 方向光 (Directional)" << std::endl;
+    std::cout << "  1: 点光源 (Point)" << std::endl;
+    std::cout << "  2: 聚光灯 (Spotlight)" << std::endl;
+    std::cout << "  ESC: 退出  |  WASD: 移动  |  Tab: 面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 12. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 12a. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // 数字键 0/1/2 切换光源类型
+        static bool key0 = false, key1 = false, key2 = false;
+        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) { if (!key0) { lightType = 0; key0 = true; std::cout << "◆ 方向光 (Directional)" << std::endl; } } else { key0 = false; }
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) { if (!key1) { lightType = 1; key1 = true; std::cout << "◆ 点光源 (Point)" << std::endl; } } else { key1 = false; }
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) { if (!key2) { lightType = 2; key2 = true; std::cout << "◆ 聚光灯 (Spotlight)" << std::endl; } } else { key2 = false; }
+
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) { if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; } } else { tabPressed = false; }
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+
+        // ===== 12b. 光源自动旋转（仅 point / spotlight） =====
+        if (lightAutoRotate && lightType > 0)
+        {
+            float radius = glm::length(lightPos);
+            float angle  = (float)glfwGetTime() * 0.8f;
+            lightPos.x = cos(angle) * radius;
+            lightPos.z = sin(angle) * radius;
+            lightPosArray[0] = lightPos.x;
+            lightPosArray[1] = lightPos.y;
+            lightPosArray[2] = lightPos.z;
+        }
+
+        // ===== 12c. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 12d. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 12e. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染所有立方体
+        // ================================================================
+
+        lightingShader.use();
+        lightingShader.setMat4("projection", projection);
+        lightingShader.setMat4("view", view);
+        lightingShader.setInt("lightType", lightType);
+        lightingShader.setVec3("viewPos", camPos.x, camPos.y, camPos.z);
+
+        // ---- 光源通用属性 ----
+        lightingShader.setVec3("light.ambient",   lightAmbientArray[0],  lightAmbientArray[1],  lightAmbientArray[2]);
+        lightingShader.setVec3("light.diffuse",   lightDiffuseArray[0],  lightDiffuseArray[1],  lightDiffuseArray[2]);
+        lightingShader.setVec3("light.specular",  lightSpecularArray[0], lightSpecularArray[1], lightSpecularArray[2]);
+
+        // ---- 方向 / 位置 ----
+        glm::vec3 dir = glm::normalize(lightDirection);
+        lightingShader.setVec3("light.direction", dir.x, dir.y, dir.z);
+        lightingShader.setVec3("light.position",  lightPosArray[0], lightPosArray[1], lightPosArray[2]);
+
+        // ---- 衰减 ----
+        lightingShader.setFloat("light.constant",  attenuationConstant);
+        lightingShader.setFloat("light.linear",    attenuationLinear);
+        lightingShader.setFloat("light.quadratic", attenuationQuadratic);
+
+        // ---- 聚光灯锥体（传余弦值） ----
+        lightingShader.setFloat("light.cutOff",      cos(glm::radians(cutOffDeg)));
+        lightingShader.setFloat("light.outerCutOff", cos(glm::radians(outerCutOffDeg)));
+
+        // ---- 材质 ----
+        lightingShader.setFloat("material.shininess", shininess);
+
+        // ---- 绑定纹理 ----
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, diffuseMap);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, specularMap);
+
+        // ---- 绘制 10 个立方体 ----
+        glBindVertexArray(cubeVAO);
+        for (int i = 0; i < NUM_CUBES; i++)
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[i]);
+
+            // 每个立方体有不同的旋转，让场景更生动
+            float angle = 20.0f * (i + 1);
+            model = glm::rotate(model, glm::radians(angle),
+                                glm::vec3(1.0f, 0.3f, 0.5f));
+
+            lightingShader.setMat4("model", model);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // ================================================================
+        // 第二部分：渲染光源标记（仅点光源/聚光灯）
+        // ================================================================
+
+        if (lightType > 0)
+        {
+            lightCubeShader.use();
+            lightCubeShader.setMat4("projection", projection);
+            lightCubeShader.setMat4("view", view);
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(lightPosArray[0], lightPosArray[1], lightPosArray[2]));
+            model = glm::scale(model, glm::vec3(0.2f));
+            lightCubeShader.setMat4("model", model);
+            lightCubeShader.setVec3("lightColor", lightDiffuseArray[0], lightDiffuseArray[1], lightDiffuseArray[2]);
+
+            glBindVertexArray(lightVAO);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // ===== 12f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Light Casters");
+
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 光源类型 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Light Type");
+            ImGui::RadioButton("Directional", &lightType, 0); ImGui::SameLine();
+            ImGui::RadioButton("Point",       &lightType, 1); ImGui::SameLine();
+            ImGui::RadioButton("Spotlight",   &lightType, 2);
+
+            // 切换时打印日志
+            static int prevType = -1;
+            if (lightType != prevType) {
+                const char* names[] = { "方向光 (Directional)", "点光源 (Point)", "聚光灯 (Spotlight)" };
+                std::cout << "◆ " << names[lightType] << std::endl;
+                prevType = lightType;
+            }
+            ImGui::Separator();
+
+            // ---- 光源颜色 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Light Colors");
+            ImGui::ColorEdit3("Ambient",  lightAmbientArray);
+            ImGui::ColorEdit3("Diffuse",  lightDiffuseArray);
+            ImGui::ColorEdit3("Specular", lightSpecularArray);
+            ImGui::Separator();
+
+            // ---- 方向光 / 聚光灯：方向 ----
+            if (lightType == 0 || lightType == 2)
+            {
+                ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Direction");
+                ImGui::SliderFloat3("Light Dir", lightDirArray, -1.0f, 1.0f, "%.2f");
+                // 保持方向向量为合理长度
+                if (glm::length(glm::vec3(lightDirArray[0], lightDirArray[1], lightDirArray[2])) > 0.01f)
+                    lightDirection = glm::vec3(lightDirArray[0], lightDirArray[1], lightDirArray[2]);
+                else
+                    lightDirection = glm::vec3(0.0f, -1.0f, 0.0f);
+            }
+
+            // ---- 点光源 / 聚光灯：位置 ----
+            if (lightType > 0)
+            {
+                ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Position");
+                ImGui::SliderFloat3("Light Pos", lightPosArray, -5.0f, 5.0f, "%.1f");
+                ImGui::Checkbox("Auto Rotate", &lightAutoRotate);
+            }
+            ImGui::Separator();
+
+            // ---- 衰减（仅 point / spotlight） ----
+            if (lightType > 0)
+            {
+                ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "Attenuation");
+                ImGui::SliderFloat("Constant",  &attenuationConstant,  0.01f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Linear",    &attenuationLinear,    0.001f, 1.0f, "%.3f");
+                ImGui::SliderFloat("Quadratic", &attenuationQuadratic, 0.001f, 2.0f, "%.3f");
+
+                // 显示当前距离的衰减值预览
+                float dist = glm::length(glm::vec3(lightPosArray[0], lightPosArray[1], lightPosArray[2]) - glm::vec3(0.0f));
+                float atten = 1.0f / (attenuationConstant + attenuationLinear * dist + attenuationQuadratic * dist * dist);
+                ImGui::Text("Attenuation at center: %.3f", atten);
+            }
+
+            // ---- 聚光灯锥体 ----
+            if (lightType == 2)
+            {
+                ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.4f, 1.0f), "Spotlight Cone");
+                ImGui::SliderFloat("Inner Angle", &cutOffDeg, 1.0f, 90.0f, "%.1f°");
+                ImGui::SliderFloat("Outer Angle", &outerCutOffDeg, 1.0f, 90.0f, "%.1f°");
+                if (outerCutOffDeg < cutOffDeg) outerCutOffDeg = cutOffDeg;
+
+                // 显示余弦值对照
+                ImGui::Text("cos(inner=%.1f°) = %.3f", cutOffDeg, cos(glm::radians(cutOffDeg)));
+                ImGui::Text("cos(outer=%.1f°) = %.3f", outerCutOffDeg, cos(glm::radians(outerCutOffDeg)));
+            }
+            ImGui::Separator();
+
+            // ---- 材质 ----
+            ImGui::SliderFloat("Shininess", &shininess, 1.0f, 256.0f, "%.0f");
+            ImGui::Separator();
+
+            // ---- 选项 ----
+            ImGui::SliderFloat("Speed", &camMoveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::ColorEdit3("Clear", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled("0/1/2: Light Type  |  WASD: Move  |  Tab: Panel");
+
+            ImGui::End();
+        }
+
+        // ===== 12g. ImGui：渲染 + 交换缓冲 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 13. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &lightVAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+    glDeleteTextures(1, &diffuseMap);
+    glDeleteTextures(1, &specularMap);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：光照贴图（Lighting Maps）" << std::endl;
-    return runLightingMapsDemo();
+    std::cout << "▶ 运行最新章节：投光物（Light Casters）" << std::endl;
+    return runLightCastersDemo();
 }
