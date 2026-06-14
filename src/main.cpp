@@ -1371,11 +1371,445 @@ int runColorsDemo()
 
 
 // ================================================================
+// 基础光照（Basic Lighting）— Phong 光照模型
+// ================================================================
+//
+// 相比颜色章节（Light × Object = Perceived Color），
+// 这里引入真正的光照计算 — Phong 光照模型，包含三个分量：
+//
+//   ① Ambient  （环境光） — 最低亮度，避免背面全黑
+//   ② Diffuse  （漫反射） — 法线与光线的夹角决定亮度
+//   ③ Specular（镜面反射）— 视线与反射光线的夹角决定高光
+//
+// 顶点数据变化：
+//   之前： [位置 (3) | 纹理坐标 (2)]        = 5 float/vertex
+//   现在： [位置 (3) | 法线 (3) | 纹理坐标 (2)] = 8 float/vertex
+//
+
+int runBasicLightingDemo()
+{
+    const unsigned int SCR_WIDTH  = 800;
+    const unsigned int SCR_HEIGHT = 600;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Basic Lighting (Phong) | WASD: move  | Tab: panel", NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 启用深度测试 ==========
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 4. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 5. 编译着色器 ==========
+    //
+    // lightingShader — 主物体（应用 Phong 光照模型）
+    // lightCubeShader — 光源标记（纯色小立方体，复用颜色章节）
+    //
+    Shader lightingShader("shaders/lighting/basic_lighting.vert",
+                          "shaders/lighting/basic_lighting.frag", true);
+    Shader lightCubeShader("shaders/lighting/light_cube.vert",
+                           "shaders/lighting/light_cube.frag", true);
+
+    // ========== 6. 顶点数据（带法线） ==========
+    //
+    // ★★★ 核心变化：每个顶点新增法线（Normal）★★★
+    //
+    // 数据结构： [位置 xyz] [法线 xyz] [纹理坐标 uv]
+    // 每个顶点 8 个 float，stride = 32 字节
+    //
+    float vertices[] = {
+        // ============ 背面 (Z-) 法线: (0,0,-1) ============
+        -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+        // ============ 正面 (Z+) 法线: (0,0,1) ============
+        -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
+        // ============ 左面 (X-) 法线: (-1,0,0) ============
+        -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+        // ============ 右面 (X+) 法线: (1,0,0) ============
+         0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+        // ============ 底面 (Y-) 法线: (0,-1,0) ============
+        -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+        // ============ 顶面 (Y+) 法线: (0,1,0) ============
+        -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f
+    };
+
+    unsigned int indices[] = {
+         0,  1,  2,    2,  3,  0,   // 背面
+         4,  5,  6,    6,  7,  4,   // 正面
+         8,  9, 10,   10, 11,  8,   // 左面
+        12, 13, 14,   14, 15, 12,   // 右面
+        16, 17, 18,   18, 19, 16,   // 底面
+        20, 21, 22,   22, 23, 20    // 顶面
+    };
+
+    // ========== 7. VAO / VBO / EBO ==========
+    //
+    // 主立方体 VAO（cubeVAO）：
+    //   启用所有 3 个顶点属性（位置 + 法线 + 纹理坐标）
+    //   对应 basic_lighting.vert 的 layout 声明
+    //
+    // 光源 VAO（lightVAO）：
+    //   只启用位置属性，复用同一份 VBO/EBO
+    //
+    unsigned int cubeVAO, lightVAO, VBO, EBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenVertexArrays(1, &lightVAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    // ---- cubeVAO：主物体（全部属性） ----
+    glBindVertexArray(cubeVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    // 位置属性 (location = 0) — 3 floats, stride 32
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // 法线属性 (location = 1) — 3 floats, stride 32, offset 12
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    // 纹理坐标属性 (location = 2) — 2 floats, stride 32, offset 24
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ---- lightVAO：光源标记（只取位置） ----
+    glBindVertexArray(lightVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+
+    // 只启用位置属性（light_cube.vert 只有 layout 0）
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    glBindVertexArray(0);
+
+    // ========== 8. 加载纹理 ==========
+    unsigned int texture1 = loadTexture("textures/container.jpg");
+
+    // ========== 9. 设置纹理单元 ==========
+    lightingShader.use();
+    lightingShader.setInt("texture1", 0);
+
+    // ========== 10. 用户控制参数 ==========
+
+    // ---- 光源 ----
+    glm::vec3 lightPos     = glm::vec3(1.2f, 1.0f, 2.0f);
+    glm::vec3 lightColor   = glm::vec3(1.0f);            // 白光
+    float lightPosArray[3] = { 1.2f, 1.0f, 2.0f };
+    float lightColorArray[3] = { 1.0f, 1.0f, 1.0f };
+
+    // ---- 物体材质 ----
+    glm::vec3 objectColor   = glm::vec3(1.0f, 0.5f, 0.31f);  // 珊瑚色
+    float objectColorArray[3] = { 1.0f, 0.5f, 0.31f };
+
+    // ---- Phong 参数 ----
+    float ambientStrength  = 0.1f;    // 环境光强度
+    float specularStrength = 0.5f;    // 镜面反射强度
+    float shininess        = 32.0f;   // 反光度
+    bool  useTexture       = true;    // 是否叠加纹理
+    bool  lightAutoRotate  = false;   // 光源是否自动旋转
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos   = glm::vec3(0.0f, 0.0f, 5.0f);
+    float     fov      = 45.0f;
+    float     camMoveSpeed = 0.08f;
+
+    // ---- 调试 ----
+    bool showDebugPanel = true;
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 11. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 12. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  基础光照（Basic Lighting）— Phong 模型" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  核心公式: (Ambient + Diffuse + Specular)" << std::endl;
+    std::cout << "  ESC       → 退出" << std::endl;
+    std::cout << "  WASD/箭头 → 摄像机移动" << std::endl;
+    std::cout << "  Tab       → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 13. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 13a. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // Tab：切换 ImGui 面板
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        // WASD / 方向键：摄像机移动
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= glm::vec3(0.0f, camMoveSpeed, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += glm::vec3(camMoveSpeed, 0.0f, 0.0f);
+
+        // ===== 13b. 光源自动旋转 =====
+        if (lightAutoRotate)
+        {
+            float radius = glm::length(lightPos);
+            float angle  = (float)glfwGetTime() * 0.8f;
+            lightPos.x = cos(angle) * radius;
+            lightPos.z = sin(angle) * radius;
+            lightPosArray[0] = lightPos.x;
+            lightPosArray[1] = lightPos.y;
+            lightPosArray[2] = lightPos.z;
+        }
+
+        // ===== 13c. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 13d. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 13e. MVP 矩阵（与摄像机共用） =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染主物体（应用 Phong 光照模型）
+        // ================================================================
+
+        lightingShader.use();
+
+        // ---- MVP 矩阵 ----
+        glm::mat4 model = glm::mat4(1.0f);
+        lightingShader.setMat4("projection", projection);
+        lightingShader.setMat4("view", view);
+        lightingShader.setMat4("model", model);
+
+        // ---- 光源参数 ----
+        lightingShader.setVec3("lightPos",  lightPos.x,  lightPos.y,  lightPos.z);
+        lightingShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
+        lightingShader.setVec3("viewPos",   camPos.x,    camPos.y,    camPos.z);
+
+        // ---- 物体材质 ----
+        lightingShader.setVec3("objectColor", objectColor.x, objectColor.y, objectColor.z);
+        lightingShader.setBool("useTexture", useTexture);
+
+        // ---- Phong 模型参数 ----
+        lightingShader.setFloat("ambientStrength",  ambientStrength);
+        lightingShader.setFloat("specularStrength", specularStrength);
+        lightingShader.setFloat("shininess", shininess);
+
+        // 可选绑定纹理
+        if (useTexture)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, texture1);
+        }
+
+        glBindVertexArray(cubeVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ================================================================
+        // 第二部分：渲染光源标记（小立方体）
+        // ================================================================
+
+        lightCubeShader.use();
+        lightCubeShader.setMat4("projection", projection);
+        lightCubeShader.setMat4("view", view);
+
+        model = glm::mat4(1.0f);
+        model = glm::translate(model, lightPos);
+        model = glm::scale(model, glm::vec3(0.2f));
+        lightCubeShader.setMat4("model", model);
+
+        lightCubeShader.setVec3("lightColor", lightColor.x, lightColor.y, lightColor.z);
+
+        glBindVertexArray(lightVAO);
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+        // ===== 13f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Basic Lighting");
+
+            // ---- 性能 ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- Phong 光照模型概览 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Phong Lighting Model");
+            ImGui::Text("Result = (Ambient + Diffuse + Specular) × Color");
+            ImGui::Separator();
+
+            // ---- 光源设置 ----
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "Light Source");
+            ImGui::ColorEdit3("Light Color", lightColorArray);
+            ImGui::SliderFloat("Light X", &lightPosArray[0], -4.0f, 4.0f, "%.1f");
+            ImGui::SliderFloat("Light Y", &lightPosArray[1], -4.0f, 4.0f, "%.1f");
+            ImGui::SliderFloat("Light Z", &lightPosArray[2], -5.0f, 5.0f, "%.1f");
+            lightPos = glm::vec3(lightPosArray[0], lightPosArray[1], lightPosArray[2]);
+            lightColor = glm::vec3(lightColorArray[0], lightColorArray[1], lightColorArray[2]);
+            ImGui::Checkbox("Auto Rotate Light", &lightAutoRotate);
+            ImGui::Separator();
+
+            // ---- 材质 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Object Material");
+            ImGui::ColorEdit3("Object Color", objectColorArray);
+            objectColor = glm::vec3(objectColorArray[0], objectColorArray[1], objectColorArray[2]);
+            ImGui::Separator();
+
+            // ---- Phong 参数 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Phong Parameters");
+
+            // 环境光
+            ImGui::SliderFloat("Ambient Strength", &ambientStrength, 0.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("最低亮度，防止背面全黑。值越大物体整体越亮。");
+
+            // 漫反射（没有单独参数，由法线与光线的 dot product 自动计算）
+
+            // 镜面反射
+            ImGui::SliderFloat("Specular Strength", &specularStrength, 0.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("高光亮度。值为 0 时无高光（粗糙表面），值越大高光越亮。");
+
+            ImGui::SliderFloat("Shininess", &shininess, 1.0f, 256.0f, "%.0f");
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("反光度控制高光范围。小值（8）→ 大范围高光（粗糙）；大值（256）→ 小范围高光（光滑）。");
+            ImGui::Separator();
+
+            // ---- 预览：各分量贡献 ----
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Component Preview");
+            ImVec4 ambColor(ambientStrength, ambientStrength, ambientStrength, 1.0f);
+            ImVec4 specColor(specularStrength * 0.5f, specularStrength * 0.5f, specularStrength * 0.5f, 1.0f);
+            ImGui::ColorButton("Ambient",  ambColor, 0, ImVec2(60, 20)); ImGui::SameLine();
+            ImGui::Text(" Ambient  = %.1f× lightColor", ambientStrength);
+            ImGui::ColorButton("Specular", specColor, 0, ImVec2(60, 20)); ImGui::SameLine();
+            ImGui::Text(" Specular = %.1f× spec × lightColor (shininess=%.0f)",
+                        specularStrength, shininess);
+            ImGui::Separator();
+
+            // ---- 选项 ----
+            ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.4f, 1.0f), "Options");
+            ImGui::Checkbox("Use Texture", &useTexture);
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::SliderFloat("Camera Speed", &camMoveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            ImGui::TextDisabled("WASD/Arrows: Move  |  Tab: Panel  |  ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 13g. ImGui：渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // ===== 13h. 交换缓冲 + 事件处理 =====
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 14. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteVertexArrays(1, &lightVAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+    glDeleteTextures(1, &texture1);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：光照/颜色（Colors）" << std::endl;
-    return runColorsDemo();
+    std::cout << "▶ 运行最新章节：基础光照（Basic Lighting）" << std::endl;
+    return runBasicLightingDemo();
 }
