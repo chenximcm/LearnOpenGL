@@ -173,6 +173,8 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\common\shader.h" />
+    <ClInclude Include="src\common\mesh.h" />
+    <ClInclude Include="src\common\model.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\triangle\triangle.vert" />
@@ -182,6 +184,8 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="shaders\textures\texture_combined.frag" />
     <None Include="shaders\transformations\transform.vert" />
     <None Include="shaders\coordinates\coordinate_system.vert" />
+    <None Include="shaders\model\model.vert" />
+    <None Include="shaders\model\model.frag" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />
