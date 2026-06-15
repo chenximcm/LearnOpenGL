@@ -23,6 +23,10 @@
 // 自定义 Shader 类
 #include "common/shader.h"
 
+// Mesh / Model 类（模型加载章节）
+#include "common/mesh.h"
+#include "common/model.h"
+
 // stb_image（声明部分，实现在 common/stb_image.cpp 中）
 #include "../vendor/include/stb_image.h"
 
@@ -3544,12 +3548,346 @@ int runMultipleLightsDemo()
 
 
 // ================================================================
+// 模型加载（Model Loading）— Assimp
+// ================================================================
+/**
+ * 运行模型加载演示：
+ *   加载 backpack.obj，用全光照（方向光 + 点光源 + 手电筒）渲染，
+ *   并带 ImGui 调试面板控制光源参数。
+ *
+ * 章节：模型加载 — Assimp
+ */
+int runModelLoadingDemo()
+{
+    // ========== 1. 窗口初始化 ==========
+    GLFWwindow* window = initGLFW(
+        "LearnOpenGL - Model Loading (Assimp) | WASD: move  | Tab: panel"
+    );
+    if (!window) return -1;
+
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 2. GLAD & Depth ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        std::cerr << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 3. 着色器 ==========
+    Shader modelShader(
+        "shaders/model/model.vert",
+        "shaders/model/model.frag",
+        true   // fromFile
+    );
+
+    // ========== 4. 加载模型 ==========
+    Model backpack("models/backpack/backpack.obj");
+
+    // ========== 5. ImGui 初始化 ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.FontGlobalScale = 1.8f;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 状态变量 ==========
+    // ---- 摄像机 ----
+    glm::vec3 camPos     = glm::vec3(0.0f, 1.5f, 5.0f);
+    float     camYaw     = -90.0f;
+    float     camPitch   = 0.0f;
+    float     camMoveSpeed = 0.08f;
+    float     camSensitivity = 0.1f;
+    double    lastMX = 400, lastMY = 300;
+    bool      firstMouse = true;
+
+    // ---- 模型变换 ----
+    float modelRotX = 0.0f, modelRotY = 0.0f;
+    float modelScale = 1.0f;
+
+    // ---- 投影 ----
+    float fov = 60.0f;
+
+    // ---- 光源开关 ----
+    bool dirLightOn    = true;
+    bool pointLightOn  = true;
+    bool spotLightOn   = false;
+
+    // ---- 光源参数（方向光） ----
+    glm::vec3 dirLightDir(-0.2f, -1.0f, -0.3f);
+    glm::vec3 dirAmbient(0.2f, 0.2f, 0.2f);
+    glm::vec3 dirDiffuse(0.8f, 0.8f, 0.8f);
+    glm::vec3 dirSpecular(1.0f, 1.0f, 1.0f);
+
+    // ---- 光源参数（点光源） ----
+    struct {
+        glm::vec3 pos;
+        glm::vec3 ambient;
+        glm::vec3 diffuse;
+        glm::vec3 specular;
+        float     constant, linear, quadratic;
+    } pointLights[4] = {
+        { glm::vec3( 2.0f,  2.0f,  2.0f), glm::vec3(0.1f), glm::vec3(0.8f), glm::vec3(1.0f), 1.0f, 0.09f, 0.032f },
+        { glm::vec3(-2.0f,  1.5f,  1.5f), glm::vec3(0.1f), glm::vec3(0.8f), glm::vec3(1.0f), 1.0f, 0.09f, 0.032f },
+        { glm::vec3( 1.5f,  0.5f, -2.0f), glm::vec3(0.1f), glm::vec3(0.8f), glm::vec3(1.0f), 1.0f, 0.09f, 0.032f },
+        { glm::vec3(-1.5f,  1.0f, -1.5f), glm::vec3(0.1f), glm::vec3(0.8f), glm::vec3(1.0f), 1.0f, 0.09f, 0.032f },
+    };
+    int activePointLights = 4;
+
+    // ---- 手电筒 ----
+    float spotCutOff      = glm::cos(glm::radians(12.5f));
+    float spotOuterCutOff = glm::cos(glm::radians(17.5f));
+
+    // ---- 背景色 ----
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+
+    // ---- 模型光源控制 ----
+    bool showLightSpheres = true;
+    bool showDebugPanel = true;
+
+    // ========== 7. 光源球体的 VAO（可视化点光源位置） ==========
+    unsigned int sphereVAO = 0, sphereVBO = 0, sphereEBO = 0;
+    // 简单的光源球体（使用经纬球体简化为 icosahedron 层级的小球）
+    // 这里仅用于可视化，用一个简单的立方体代替
+    {
+        float vertices[] = {
+            -0.15f, -0.15f, -0.15f,  0.15f, -0.15f, -0.15f,  0.15f,  0.15f, -0.15f,
+             0.15f,  0.15f, -0.15f, -0.15f,  0.15f, -0.15f, -0.15f, -0.15f, -0.15f,
+            -0.15f, -0.15f,  0.15f,  0.15f, -0.15f,  0.15f,  0.15f,  0.15f,  0.15f,
+             0.15f,  0.15f,  0.15f, -0.15f,  0.15f,  0.15f, -0.15f, -0.15f,  0.15f,
+            -0.15f,  0.15f,  0.15f, -0.15f,  0.15f, -0.15f, -0.15f, -0.15f, -0.15f,
+            -0.15f, -0.15f, -0.15f, -0.15f, -0.15f,  0.15f, -0.15f,  0.15f,  0.15f,
+             0.15f,  0.15f,  0.15f,  0.15f,  0.15f, -0.15f,  0.15f, -0.15f, -0.15f,
+             0.15f, -0.15f, -0.15f,  0.15f, -0.15f,  0.15f,  0.15f,  0.15f,  0.15f,
+            -0.15f, -0.15f, -0.15f,  0.15f, -0.15f, -0.15f,  0.15f, -0.15f,  0.15f,
+             0.15f, -0.15f,  0.15f, -0.15f, -0.15f,  0.15f, -0.15f, -0.15f, -0.15f,
+            -0.15f,  0.15f, -0.15f,  0.15f,  0.15f, -0.15f,  0.15f,  0.15f,  0.15f,
+             0.15f,  0.15f,  0.15f, -0.15f,  0.15f,  0.15f, -0.15f,  0.15f, -0.15f,
+        };
+        unsigned int indices[] = {
+            0,1,2, 0,2,3, 4,5,6, 4,6,7,
+            8,9,10, 8,10,11, 12,13,14, 12,14,15,
+            16,17,18, 16,18,19, 20,21,22, 20,22,23
+        };
+        glGenVertexArrays(1, &sphereVAO);
+        glGenBuffers(1, &sphereVBO);
+        glGenBuffers(1, &sphereEBO);
+        glBindVertexArray(sphereVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+        glBindVertexArray(0);
+    }
+
+    // 用于渲染光源位置的小型着色器
+    Shader lightShader(
+        "shaders/lighting/light_cube.vert",
+        "shaders/lighting/light_cube.frag",
+        true
+    );
+
+    // ========== 8. 主循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ---- deltaTime（简化：固定 timestep ~16ms） ----
+        float deltaTime = 0.016f;
+
+        // ---- 输入 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += camMoveSpeed * glm::vec3(0, 0, -1);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos += camMoveSpeed * glm::vec3(0, 0,  1);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos += camMoveSpeed * glm::vec3(-1, 0, 0);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += camMoveSpeed * glm::vec3( 1, 0, 0);
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) spotLightOn = !spotLightOn;
+
+        // ---- 鼠标控制 ----
+        double mx, my;
+        glfwGetCursorPos(window, &mx, &my);
+        if (firstMouse) { lastMX = mx; lastMY = my; firstMouse = false; }
+        double dx = mx - lastMX, dy = lastMY - my;
+        lastMX = mx; lastMY = my;
+        // Tab：切换 ImGui 调试面板
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else { tabPressed = false; }
+
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+            camYaw   += (float)dx * camSensitivity;
+            camPitch += (float)dy * camSensitivity;
+            camPitch  = glm::clamp(camPitch, -89.0f, 89.0f);
+        }
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+
+        // ---- 矩阵 ----
+        glm::mat4 view       = glm::lookAt(camPos, camPos + front, glm::vec3(0, 1, 0));
+        glm::mat4 projection = glm::perspective(glm::radians(fov), 800.0f / 600.0f, 0.1f, 100.0f);
+
+        // ---- 模型矩阵 ----
+        glm::mat4 modelMat = glm::mat4(1.0f);
+        modelMat = glm::rotate(modelMat, glm::radians(modelRotX), glm::vec3(1, 0, 0));
+        modelMat = glm::rotate(modelMat, glm::radians(modelRotY), glm::vec3(0, 1, 0));
+        modelMat = glm::scale(modelMat, glm::vec3(modelScale));
+
+        // ===== 9a. 清屏 =====
+        glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 9b. 渲染模型 =====
+        modelShader.use();
+        modelShader.setMat4("projection", projection);
+        modelShader.setMat4("view", view);
+        modelShader.setMat4("model", modelMat);
+
+        // ---- 方向光 ----
+        modelShader.setBool("dirLightEnabled", dirLightOn);
+        modelShader.setVec3("dirLight.direction", dirLightDir);
+        modelShader.setVec3("dirLight.ambient",  dirAmbient);
+        modelShader.setVec3("dirLight.diffuse",  dirDiffuse);
+        modelShader.setVec3("dirLight.specular", dirSpecular);
+
+        // ---- 点光源 ----
+        modelShader.setBool("pointLightsEnabled", pointLightOn);
+        for (int i = 0; i < 4; i++) {
+            std::string prefix = "pointLights[" + std::to_string(i) + "].";
+            modelShader.setVec3(prefix + "position",  pointLights[i].pos);
+            modelShader.setVec3(prefix + "ambient",   pointLights[i].ambient);
+            modelShader.setVec3(prefix + "diffuse",   pointLights[i].diffuse);
+            modelShader.setVec3(prefix + "specular",  pointLights[i].specular);
+            modelShader.setFloat(prefix + "constant",  pointLights[i].constant);
+            modelShader.setFloat(prefix + "linear",    pointLights[i].linear);
+            modelShader.setFloat(prefix + "quadratic", pointLights[i].quadratic);
+        }
+
+        // ---- 聚光灯（手电筒） ----
+        modelShader.setBool("spotLightEnabled", spotLightOn);
+        modelShader.setVec3("spotLight.position", camPos);
+        modelShader.setVec3("spotLight.direction", front);
+        modelShader.setFloat("spotLight.cutOff",      spotCutOff);
+        modelShader.setFloat("spotLight.outerCutOff", spotOuterCutOff);
+        modelShader.setVec3("spotLight.ambient",  0.0f, 0.0f, 0.0f);
+        modelShader.setVec3("spotLight.diffuse",  1.0f, 1.0f, 1.0f);
+        modelShader.setVec3("spotLight.specular", 1.0f, 1.0f, 1.0f);
+        modelShader.setFloat("spotLight.constant",  1.0f);
+        modelShader.setFloat("spotLight.linear",    0.09f);
+        modelShader.setFloat("spotLight.quadratic", 0.032f);
+
+        modelShader.setVec3("viewPos", camPos);
+
+        // Draw the model
+        backpack.Draw(modelShader);
+
+        // ===== 9c. 渲染光源位置（小球体） =====
+        if (showLightSpheres && pointLightOn) {
+            lightShader.use();
+            lightShader.setMat4("projection", projection);
+            lightShader.setMat4("view", view);
+            for (int i = 0; i < activePointLights; i++) {
+                glm::mat4 lightModel = glm::translate(glm::mat4(1.0f), pointLights[i].pos);
+                lightShader.setMat4("model", lightModel);
+                lightShader.setVec3("lightColor", pointLights[i].diffuse);
+                glBindVertexArray(sphereVAO);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            }
+        }
+
+        // ===== 10. ImGui 面板 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel)
+        {
+            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Once);
+            ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_Once);
+            ImGui::Begin("Debug Panel - Model Loading");
+
+            ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "★ Model Loading (Assimp)");
+            ImGui::Separator();
+
+            // ---- 模型变换 ----
+            ImGui::Text("Model Transform");
+            ImGui::SliderFloat("Rotate X", &modelRotX, -180.0f, 180.0f);
+            ImGui::SliderFloat("Rotate Y", &modelRotY, -180.0f, 180.0f);
+            ImGui::SliderFloat("Scale", &modelScale, 0.1f, 3.0f);
+            ImGui::Separator();
+
+            // ---- 光源控制 ----
+            ImGui::Checkbox("Directional Light", &dirLightOn);
+            ImGui::Checkbox("Point Lights", &pointLightOn);
+            ImGui::Checkbox("Flashlight (F)", &spotLightOn);
+            ImGui::Checkbox("Show Light Spheres", &showLightSpheres);
+            ImGui::Separator();
+
+            // ---- 方向光颜色 ----
+            ImGui::ColorEdit3("Dir Ambient",  (float*)&dirAmbient);
+            ImGui::ColorEdit3("Dir Diffuse",  (float*)&dirDiffuse);
+            ImGui::ColorEdit3("Dir Specular", (float*)&dirSpecular);
+            ImGui::Separator();
+
+            // ---- 点光源 ----
+            if (pointLightOn) {
+                for (int i = 0; i < activePointLights; i++) {
+                    ImGui::PushID(i);
+                    ImGui::Text("Point Light %d", i);
+                    ImGui::DragFloat3("Pos", (float*)&pointLights[i].pos, 0.1f);
+                    ImGui::ColorEdit3("Ambient", (float*)&pointLights[i].ambient);
+                    ImGui::ColorEdit3("Diffuse", (float*)&pointLights[i].diffuse);
+                    ImGui::PopID();
+                }
+                ImGui::Separator();
+            }
+
+            // ---- 摄像机 ----
+            ImGui::SliderFloat("Speed", &camMoveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f");
+            ImGui::ColorEdit3("Clear", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled("WASD: Move  |  RClick+Drag: Look  |  F: Flashlight  |  Tab: Panel  |  ESC: Quit");
+            ImGui::End();
+        }
+
+        // ===== 11. ImGui 渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 12. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &sphereVAO);
+    glDeleteBuffers(1, &sphereVBO);
+    glDeleteBuffers(1, &sphereEBO);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：多光源（Multiple Lights）" << std::endl;
+    std::cout << "▶ 运行最新章节：模型加载（Model Loading - Assimp）" << std::endl;
+    return runModelLoadingDemo();
     return runMultipleLightsDemo();
     return runLightCastersDemo();
 }

@@ -208,6 +208,14 @@ public:
     }
 
     /**
+     * 设置 GLSL vec3（glm::vec3 重载）
+     */
+    void setVec3(const std::string& name, const glm::vec3& v) const
+    {
+        glUniform3f(glGetUniformLocation(ID, name.c_str()), v.x, v.y, v.z);
+    }
+
+    /**
      * 设置 GLSL 中的 vec4 类型 uniform
      *
      * 常用于传递 RGBA 颜色（4 个分量）。

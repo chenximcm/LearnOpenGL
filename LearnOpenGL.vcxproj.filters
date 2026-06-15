@@ -36,6 +36,9 @@
     <Filter Include="资源文件\coordinates">
       <UniqueIdentifier>{e1f2a3b4-c5d6-7890-efab-901234567890}</UniqueIdentifier>
     </Filter>
+    <Filter Include="资源文件\model">
+      <UniqueIdentifier>{f2a3b4c5-6d7e-8f90-abcd-0123456789ab}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 
   <!-- ======================== ClCompile ======================== -->
@@ -78,6 +81,12 @@
     <ClInclude Include="src\common\shader.h">
       <Filter>源文件\common</Filter>
     </ClInclude>
+    <ClInclude Include="src\common\mesh.h">
+      <Filter>源文件\common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\common\model.h">
+      <Filter>源文件\common</Filter>
+    </ClInclude>
   </ItemGroup>
 
   <!-- ======================== None (shaders) ======================== -->
@@ -103,11 +112,20 @@
     <None Include="shaders\coordinates\coordinate_system.vert">
       <Filter>资源文件\coordinates</Filter>
     </None>
+    <None Include="shaders\model\model.vert">
+      <Filter>资源文件\model</Filter>
+    </None>
+    <None Include="shaders\model\model.frag">
+      <Filter>资源文件\model</Filter>
+    </None>
   </ItemGroup>
 
   <!-- ======================== dll ======================== -->
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll">
+      <Filter>资源文件</Filter>
+    </None>
+    <None Include="vendor\assimp-vc140-mt.dll">
       <Filter>资源文件</Filter>
     </None>
   </ItemGroup>

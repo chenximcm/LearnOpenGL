@@ -86,11 +86,12 @@
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-       <AdditionalLibraryDirectories>vendor\GLFW;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-       <AdditionalDependencies>glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+       <AdditionalLibraryDirectories>vendor\GLFW;vendor;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>glfw3.lib;assimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -107,9 +108,13 @@
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-       <AdditionalLibraryDirectories>vendor\GLFW;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-       <AdditionalDependencies>glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+       <AdditionalLibraryDirectories>vendor\GLFW;vendor;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>glfw3.lib;assimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -123,11 +128,12 @@
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-       <AdditionalLibraryDirectories>vendor\GLFW;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-       <AdditionalDependencies>glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+       <AdditionalLibraryDirectories>vendor\GLFW;vendor;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>glfw3.lib;assimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -144,11 +150,12 @@
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-       <AdditionalLibraryDirectories>vendor\GLFW;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-       <AdditionalDependencies>glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+       <AdditionalLibraryDirectories>vendor\GLFW;vendor;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>glfw3.lib;assimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"</Command>
+      <Command>copy /Y "$(ProjectDir)vendor\GLFW\glfw3.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
@@ -178,6 +185,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />
+    <None Include="vendor\assimp-vc140-mt.dll" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
