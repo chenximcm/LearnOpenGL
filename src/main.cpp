@@ -3881,12 +3881,645 @@ int runModelLoadingDemo()
 
 
 // ================================================================
-// 主函数
+// 深度测试（Depth Testing）
+// ================================================================
+//
+// 深度测试是「高级 OpenGL」部分的第一个章节。
+// 它在片段着色器执行之后、像素写入帧缓冲之前，
+// 通过比较片段的深度值与深度缓冲区中存储的值来决定片段是否可见。
+//
+// 核心知识点：
+//   ① 深度缓冲（Depth Buffer / Z-Buffer）自动存储每个像素的深度值
+//   ② glEnable(GL_DEPTH_TEST) 启用深度测试
+//   ③ glDepthFunc() 设置比较函数（GL_LESS, GL_LEQUAL, GL_ALWAYS, ...）
+//   ④ 深度值是非线性的（近平面附近精度高，远平面附近精度低）
+//   ⑤ 深度冲突（Z-fighting）：两个面非常接近时交替写入，产生闪烁
+//
+// 本 Demo：
+//   - 一个木纹地板 + 两个带表情贴图的立方体（不同深度）
+//   - D 键 | ImGui 复选框 → 切换深度测试启用/禁用
+//   - F 键 | ImGui 下拉框 → 切换深度比较函数
+//   - V 键 → 切换深度可视化模式（显示深度缓冲区为灰度图）
+//   - ImGui 面板查看当前深度函数、切换参数
+//
+
+int runDepthTestingDemo()
+{
+    const unsigned int SCR_WIDTH  = 800;
+    const unsigned int SCR_HEIGHT = 600;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Depth Testing | Z:toggle | X:func | V:visualize | RClick:look",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 深度测试基础设置 ==========
+    //
+    // ★ 启用深度测试后，OpenGL 会为每个片段计算深度值，
+    //   并与深度缓冲区中已有的值比较。默认函数是 GL_LESS：
+    //   新片段深度 < 已有深度 → 通过（离摄像机更近）
+    //
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);   // 默认值，显式写出以明确
+
+    // ★ 明确关闭混合和面剔除，防止 ImGui 或其他遗留状态影响
+    //   awesomeface.png 有透明通道，如果 GL_BLEND 意外打开，
+    //   立方体正面的透明区域会变透明 → 露出背面
+    glDisable(GL_BLEND);
+    // ★ 启用面剔除：剔除背向三角形（默认 GL_BACK，即剔除 CW 绕序）
+    //   - 如果立方体绕序正确（CCW 从外部看）→ 外表面正常显示
+    //   - 如果立方体绕序错了（CW 从外部看）→ 外表面被剔除，立方体不可见
+    //   - 这也解释了为什么关掉深度测试后 "背面可见，正面看不到"：
+    //     因为所有面都渲染了，背面（后绘制）覆盖了正面
+    glEnable(GL_CULL_FACE);
+
+    // ========== 4. 鼠标回调（FPS 视角） ==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 400.0, lastMY = 300.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        // 仅在右键按下时旋转视角
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) {
+            lastMX = xpos;
+            lastMY = ypos;
+            firstMouse = false;
+        }
+        double dx = xpos - lastMX;
+        double dy = lastMY - ypos;
+        lastMX = xpos;
+        lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // 普通着色器：用于常规渲染（带纹理）
+    //   顶点：坐标系统（MVP + 纹理坐标输出）
+    //   片段：合并两张纹理
+    //
+    Shader shader("shaders/coordinates/coordinate_system.vert",
+                  "shaders/textures/texture_combined.frag", true);
+
+    // 深度可视化着色器：将深度值渲染为灰度图
+    //   顶点：复用坐标系统的 MVP 变换
+    //   片段：输出 gl_FragCoord.z 映射到灰度
+    //
+    Shader depthVisShader("shaders/coordinates/coordinate_system.vert",
+                          "shaders/depth_testing/depth_visualize.frag", true);
+
+    // ========== 7. 地板平面数据 ==========
+    //
+    // 一个大四边形（2 个三角形）作为地面，y = -0.51（略低于立方体底面）
+    // 格式：[位置 xyz] [纹理坐标 uv]  → 每个顶点 5 float
+    //
+    float planeVertices[] = {
+        // ★ 反转三角形绕序：从上方看应为 CCW（法线朝 +Y），
+        //   否则被 glEnable(GL_CULL_FACE) 剔除。
+        // ---- 位置 ----------    -- uv ---
+        -5.0f, -0.51f, -5.0f,     0.0f, 2.0f,   // 0: 左下后
+         5.0f, -0.51f,  5.0f,     2.0f, 0.0f,   // 1: 右下前 (原为右下后，交换顺序使法线朝上)
+         5.0f, -0.51f, -5.0f,     2.0f, 2.0f,   // 2: 右下后
+         5.0f, -0.51f,  5.0f,     2.0f, 0.0f,   // 3: 右下前
+        -5.0f, -0.51f, -5.0f,     0.0f, 2.0f,   // 4: 左下后 (原为左下前，交换顺序使法线朝上)
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f    // 5: 左下前
+    };
+
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+
+    // 位置属性 (location = 0)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    // 纹理坐标属性 (location = 1)
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 立方体数据（带纹理坐标） ==========
+    //
+    // 复用坐标系统章节的顶点格式：
+    //   5 floats/vertex = [位置 xyz] [纹理坐标 uv]
+    //
+    float cubeVertices[] = {
+        // ============ 背面 (Z- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+        // ============ 正面 (Z+ 方向) ============
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 左面 (X- 方向) ============
+        -0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,        1.0f, 1.0f,
+        // ============ 右面 (X+ 方向) ============
+         0.5f,  0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 底面 (Y- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+        // ============ 顶面 (Y+ 方向) ============
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 0.0f
+    };
+
+    unsigned int cubeIndices[] = {
+        // ★ 用叉积验证过的正确绕序（CCW 从外部看）
+        //   已修正：背面、右面、顶面的三角形顺序是反的
+        //   修正方法：在 CCW → CW 的面中交换后两个顶点
+         0,  2,  1,    2,  0,  3,   // 背面 (原 0,1,2  2,3,0 → 法线为 +Z 指向内, 需反转)
+         4,  5,  6,    6,  7,  4,   // 正面 (✓ 法线 +Z 指向外)
+         8,  9, 10,   10, 11,  8,   // 左面 (✓ 法线 -X 指向外)
+        12, 14, 13,   14, 12, 15,   // 右面 (原 12,13,14 14,15,12 → 法线 -X 指向内)
+        16, 17, 18,   18, 19, 16,   // 底面 (✓ 法线 -Y 指向外)
+        20, 22, 21,   22, 20, 23    // 顶面 (原 20,21,22 22,23,20 → 法线 -Y 指向内)
+    };
+
+    unsigned int cubeVAO, cubeVBO, cubeEBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glGenBuffers(1, &cubeEBO);
+
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 加载纹理 ==========
+    //
+    // ★ 跟教程一致：
+    //   - 地板 → floor.jpg（金属板纹理，LearnOpenGL 官方资源）
+    //   - 立方体 → container.jpg（主纹理）+ awesomeface.png（混合纹理）
+    //
+    unsigned int floorTex      = loadTexture("textures/floor.jpg", true);
+    unsigned int containerTex  = loadTexture("textures/container.jpg");
+    unsigned int faceTex       = loadTexture("textures/awesomeface.png");
+
+    // ========== 10. 设置纹理单元 ==========
+    shader.use();
+    shader.setInt("texture1", 0);
+    shader.setInt("texture2", 1);
+
+    // ========== 11. 立方体位置 ==========
+    // 两个立方体位于地板上方，前后重叠排列。
+    // ★ cube.y = 0.01 避免立方体底面和地板 (y = -0.51) Z-fighting
+    // ★ 两个立方体在视线方向上有重叠，这样开关深度测试才能看到明显区别
+    struct { glm::vec3 pos; float rotAngle; } cubes[] = {
+        { glm::vec3(-0.5f, 0.01f, -2.5f), 30.0f },   // 近（偏左）
+        { glm::vec3( 0.5f, 0.01f, -3.5f), 45.0f },   // 远（偏右，与第一个在视线方向重叠）
+    };
+    const int NUM_CUBES = 2;
+
+    // ========== 12. 深度函数定义 ==========
+    struct DepthFuncDef {
+        GLenum func;
+        const char* name;
+        const char* desc;
+    };
+    const DepthFuncDef depthFuncs[] = {
+        { GL_LESS,     "GL_LESS",     "片段深度 < 缓冲深度 → 通过（默认）" },
+        { GL_LEQUAL,   "GL_LEQUAL",   "片段深度 ≤ 缓冲深度 → 通过" },
+        { GL_EQUAL,    "GL_EQUAL",    "片段深度 = 缓冲深度 → 通过" },
+        { GL_NOTEQUAL, "GL_NOTEQUAL", "片段深度 ≠ 缓冲深度 → 通过" },
+        { GL_GREATER,  "GL_GREATER",  "片段深度 > 缓冲深度 → 通过" },
+        { GL_GEQUAL,   "GL_GEQUAL",   "片段深度 ≥ 缓冲深度 → 通过" },
+        { GL_ALWAYS,   "GL_ALWAYS",   "始终通过（无深度测试效果）" },
+        { GL_NEVER,    "GL_NEVER",    "永不通过（什么都不显示）" },
+    };
+    const int NUM_DEPTH_FUNCS = sizeof(depthFuncs) / sizeof(depthFuncs[0]);
+    int currentDepthFunc = 0;  // 默认 GL_LESS
+
+    // ========== 13. 用户控制参数 ==========
+
+    // ---- 深度测试 ----
+    bool depthTestEnabled  = true;
+    bool visualizeDepth    = false;   // 是否显示深度灰度图
+    bool linearizeDepth    = true;    // 深度可视化时是否线性化
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos     = glm::vec3(0.0f, 2.0f, 5.0f);
+    float     fov        = 45.0f;
+    float     moveSpeed  = 0.08f;
+
+    // ---- Z-fighting 演示 ----
+    bool zfightingDemo    = false;
+    float zfightingOffset = 0.005f;   // 两个重叠面之间的间距
+
+    // ---- 调试 ----
+    bool showDebugPanel = true;
+    float clearColor[3] = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 14. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 15. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  深度测试（Depth Testing）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           → 退出" << std::endl;
+    std::cout << "  WASD / 箭头   → 前后左右移动" << std::endl;
+    std::cout << "  右键拖动       → 旋转视角" << std::endl;
+    std::cout << "  Z             → 切换深度测试 开/关（← 用 Z 避免和 WASD 中 D 冲突）" << std::endl;
+    std::cout << "  X             → 切换深度函数" << std::endl;
+    std::cout << "  V             → 切换深度可视化" << std::endl;
+    std::cout << "  Tab           → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 16. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 16a. 计算 deltaTime =====
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ===== 16b. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // ---- Z 键：切换深度测试（★ 用 Z 而不是 D，避免和摄像机右移冲突！） -----
+        static bool zPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
+        {
+            if (!zPressed)
+            {
+                depthTestEnabled = !depthTestEnabled;
+                if (depthTestEnabled) {
+                    glEnable(GL_DEPTH_TEST);
+                    std::cout << "📏 深度测试: 启用" << std::endl;
+                } else {
+                    glDisable(GL_DEPTH_TEST);
+                    std::cout << "📏 深度测试: 禁用" << std::endl;
+                }
+                zPressed = true;
+            }
+        }
+        else { zPressed = false; }
+
+        // ---- X 键：切换深度函数 ----
+        static bool xPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
+        {
+            if (!xPressed)
+            {
+                currentDepthFunc = (currentDepthFunc + 1) % NUM_DEPTH_FUNCS;
+                glDepthFunc(depthFuncs[currentDepthFunc].func);
+                std::cout << "📏 深度函数: " << depthFuncs[currentDepthFunc].name
+                          << " — " << depthFuncs[currentDepthFunc].desc << std::endl;
+                xPressed = true;
+            }
+        }
+        else { xPressed = false; }
+
+        // ---- V 键：切换深度可视化 ----
+        static bool vPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS)
+        {
+            if (!vPressed) {
+                visualizeDepth = !visualizeDepth;
+                std::cout << (visualizeDepth ? "📊 深度可视化: 开启" : "📊 深度可视化: 关闭") << std::endl;
+                vPressed = true;
+            }
+        }
+        else { vPressed = false; }
+
+        // ---- WASD / 箭头键：摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;  // 帧率无关的速度
+        // 计算前方向（与摄像机视角一致）
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += right * velocity;
+
+        // ---- Tab 键：切换面板 ----
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        // ===== 16c. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 16d. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 16e. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 渲染主场景
+        // ================================================================
+
+        // 选择着色器：普通 VS 深度可视化
+        Shader& activeShader = visualizeDepth ? depthVisShader : shader;
+        activeShader.use();
+
+        // ---- 深度可视化参数 ----
+        if (visualizeDepth)
+        {
+            depthVisShader.setFloat("near", 0.1f);
+            depthVisShader.setFloat("far", 100.0f);
+            depthVisShader.setBool("linearize", linearizeDepth);
+        }
+
+        // ---- 设置 MVP（共享） -----
+        activeShader.setMat4("projection", projection);
+        activeShader.setMat4("view", view);
+
+        // ================================================================
+        // 第一部分：渲染地板
+        // ================================================================
+
+        if (!visualizeDepth)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+            // 地板不需要第二张纹理，但为了简单绑定一张
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+        }
+
+        glm::mat4 planeModel = glm::mat4(1.0f);
+        activeShader.setMat4("model", planeModel);
+
+        glBindVertexArray(planeVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // ================================================================
+        // 第二部分：渲染立方体
+        // ================================================================
+
+        if (!visualizeDepth)
+        {
+            // 立方体统一用 container.jpg（避免 awesomeface.png 的透明通道干扰）
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, containerTex);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, containerTex);
+        }
+
+        glBindVertexArray(cubeVAO);
+
+        for (int i = 0; i < NUM_CUBES; i++)
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubes[i].pos);
+            model = glm::rotate(model, glm::radians(cubes[i].rotAngle), glm::vec3(1.0f, 0.3f, 0.5f));
+
+            // 可选：Z-fighting 演示模式
+            // 在第一个立方体前面非常近的位置多画一层
+            if (zfightingDemo && i == 0)
+            {
+                // 绘制一个非常接近的快照平面
+                // 实际上是将另一个小平面放在第一个立方体前方一点点
+                // 这里我们用第二个"虚拟"绘制来模拟深度冲突
+                // 通过略微偏移的 model 矩阵实现
+
+                // 先画原始立方体
+                activeShader.setMat4("model", model);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+                // 再画一个几乎相同的立方体，位置略微微调
+                glm::mat4 zModel = model;
+                zModel = glm::translate(zModel, glm::vec3(0.0f, 0.0f, zfightingOffset));
+                activeShader.setMat4("model", zModel);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            }
+            else
+            {
+                activeShader.setMat4("model", model);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            }
+        }
+
+        // ================================================================
+        // 第三部分：Z-fighting 辅助可视化（在重叠处显示警告提示）
+        // ================================================================
+        // 通过 ImGui 面板展示警告
+
+        // ===== 16f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Depth Testing");
+
+            // ---- 性能 ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 深度测试核心控制 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Depth Test");
+
+            // 启用/禁用
+            if (ImGui::Checkbox("Enable Depth Test", &depthTestEnabled))
+            {
+                if (depthTestEnabled) {
+                    glEnable(GL_DEPTH_TEST);
+                } else {
+                    glDisable(GL_DEPTH_TEST);
+                }
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled(depthTestEnabled ? "(ON)" : "(OFF)");
+
+            // 当前深度函数状态
+            if (depthTestEnabled)
+            {
+                ImGui::Text("Current Func: ");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "%s",
+                                   depthFuncs[currentDepthFunc].name);
+                ImGui::TextDisabled("%s", depthFuncs[currentDepthFunc].desc);
+
+                // 深度函数选择器
+                ImGui::Text("Depth Function:");
+                if (ImGui::BeginCombo("##depthFunc", depthFuncs[currentDepthFunc].name))
+                {
+                    for (int i = 0; i < NUM_DEPTH_FUNCS; i++)
+                    {
+                        bool selected = (currentDepthFunc == i);
+                        if (ImGui::Selectable(depthFuncs[i].name, selected))
+                        {
+                            currentDepthFunc = i;
+                            glDepthFunc(depthFuncs[i].func);
+                            std::cout << "📏 深度函数: " << depthFuncs[i].name
+                                      << " — " << depthFuncs[i].desc << std::endl;
+                        }
+                        if (selected) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+            ImGui::Separator();
+
+            // ---- 深度可视化 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "Visualization");
+            ImGui::Checkbox("Depth Visualization (V)", &visualizeDepth);
+            if (visualizeDepth)
+            {
+                ImGui::Checkbox("Linearize Depth", &linearizeDepth);
+                ImGui::TextDisabled(
+                    linearizeDepth
+                    ? "显示线性深度：黑=近，白=远"
+                    : "显示非线性深度：近处精度高（变化慢），远处精度低（变化快）");
+            }
+            ImGui::Separator();
+
+            // ---- Z-fighting 演示 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Z-Fighting Demo");
+            ImGui::Checkbox("Enable Z-fighting", &zfightingDemo);
+            if (zfightingDemo)
+            {
+                ImGui::SliderFloat("Offset", &zfightingOffset, 0.001f, 0.05f, "%.3f");
+                ImGui::TextDisabled(
+                    "在第一个立方体前绘制一个几乎重叠的面。\n"
+                    "Offset 越小 → 重叠越严重 → Z-fighting 越明显。\n"
+                    "解决方案：使用 glPolygonOffset 或增大 offset。");
+            }
+            ImGui::Separator();
+
+            // ---- 摄像机控制 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            // ---- 清屏色 ----
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // ---- 操作帮助 ----
+            ImGui::TextDisabled(
+                "WASD/Arrows: Move     |  RClick+Drag: Look\n"
+                "Z: Toggle depth test  |  X: Cycle depth func\n"
+                "V: Toggle visualize   |  Tab: Panel\n"
+                "ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 16g. ImGui：渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // ===== 16h. 交换缓冲 + 事件处理 =====
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 17. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &cubeEBO);
+    glDeleteTextures(1, &floorTex);
+    glDeleteTextures(1, &containerTex);
+    glDeleteTextures(1, &faceTex);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
+// 主函数 — 章节选择器
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：模型加载（Model Loading - Assimp）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 深度测试（Depth Testing）" << std::endl;
+    return runDepthTestingDemo();
     return runModelLoadingDemo();
     return runMultipleLightsDemo();
     return runLightCastersDemo();

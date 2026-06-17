@@ -39,6 +39,9 @@
     <Filter Include="资源文件\model">
       <UniqueIdentifier>{f2a3b4c5-6d7e-8f90-abcd-0123456789ab}</UniqueIdentifier>
     </Filter>
+    <Filter Include="资源文件\depth_testing">
+      <UniqueIdentifier>{a3b4c5d6-7e8f-9012-abcd-123456789abc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 
   <!-- ======================== ClCompile ======================== -->
@@ -117,6 +120,9 @@
     </None>
     <None Include="shaders\model\model.frag">
       <Filter>资源文件\model</Filter>
+    </None>
+    <None Include="shaders\depth_testing\depth_visualize.frag">
+      <Filter>资源文件\depth_testing</Filter>
     </None>
   </ItemGroup>
 

@@ -186,6 +186,7 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="shaders\coordinates\coordinate_system.vert" />
     <None Include="shaders\model\model.vert" />
     <None Include="shaders\model\model.frag" />
+    <None Include="shaders\depth_testing\depth_visualize.frag" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />
