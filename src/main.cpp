@@ -6909,11 +6909,9 @@ int runFramebuffersDemo()
         screenShader.setFloat("texOffsetX", 1.0f / SCR_WIDTH);
         screenShader.setFloat("texOffsetY", 1.0f / SCR_HEIGHT);
 
-        // 翻转纹理：uv.y = 1 - uv.y
-        // 通过修改 texOffsetY 的符号+偏移来模拟翻转
-        // 更简洁的做法在 shader 中，这里通过传入标记由 C++ 控制
-        if (flipVertical)
-            screenShader.setFloat("texOffsetY", -1.0f / SCR_HEIGHT);
+        // ★ 垂直翻转：在片段着色器中翻转 uv.y
+        //   演示 FBO 纹理坐标系 (0,0=左下) vs 屏幕坐标系 (0,0=左上) 的区别
+        screenShader.setBool("flipVertical", flipVertical);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texColorBuffer);

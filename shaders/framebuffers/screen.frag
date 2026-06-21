@@ -21,6 +21,7 @@ out vec4 FragColor;
 uniform sampler2D screenTexture;
 uniform int effect;           // 当前效果编号 0~5
 uniform float time;           // 时间（未来扩展用）
+uniform bool flipVertical;    // 垂直翻转纹理（演示 OpenGL 纹理坐标与屏幕坐标的差异）
 
 // 像素偏移量（1/texture_width, 1/texture_height），由 C++ 传入
 uniform float texOffsetX;
@@ -28,7 +29,10 @@ uniform float texOffsetY;
 
 void main()
 {
-    vec3 color = texture(screenTexture, TexCoords).rgb;
+    // 翻转后处理：交换 uv.y，模拟 FBO 纹理坐标系 (0,0 = 左下)
+    // 与屏幕坐标系 (0,0 = 左上) 之间的差异
+    vec2 uv = flipVertical ? vec2(TexCoords.x, 1.0 - TexCoords.y) : TexCoords;
+    vec3 color = texture(screenTexture, uv).rgb;
 
     // === 效果 0: Normal（直通） ===
     if (effect == 0)
@@ -73,7 +77,7 @@ void main()
 
     vec3 samples[9];
     for (int i = 0; i < 9; i++)
-        samples[i] = texture(screenTexture, TexCoords + offsets[i]).rgb;
+        samples[i] = texture(screenTexture, uv + offsets[i]).rgb;
 
     // === 效果 3: Sharpen（锐化） ===
     if (effect == 3)
