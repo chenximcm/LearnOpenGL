@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：模板测试（Stencil Testing）— 物体描边
+ *  当前学习章节：混合（Blending）— Alpha 丢弃 & 半透明渲染
  * ============================================================
  */
 
@@ -5191,12 +5191,800 @@ int runStencilTestingDemo()
 
 
 // ================================================================
+// 第十八章：混合（Blending）—— 透明与半透明渲染
+// ================================================================
+
+/**
+ * ============================================================
+ *  第十八章：混合（Blending）
+ * ============================================================
+ *
+ * 混合是 OpenGL 高级部分的第三章。前面的深度测试和模板测试
+ * 都在决定"片段是否通过"，而混合决定了"片段如何与已有颜色合并"。
+ *
+ * ★ 两种透明度处理方法：
+ *
+ * 1. Alpha 丢弃（Discard）
+ *    - 使用 discard 关键字在片段着色器中丢弃透明像素
+ *    - 深度缓冲区正常写入（非丢弃的像素）
+ *    - 适用：只有"全透明/全不透明"的纹理（草叶、栅栏）
+ *    - 不适用：半透明（比如 30% 透明的玻璃）
+ *
+ * 2. 混合（Blending）
+ *    - glEnable(GL_BLEND)
+ *    - glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+ *    - 公式: result = src * src_alpha + dst * (1 - src_alpha)
+ *    - 深度写入必须关闭：glDepthMask(GL_FALSE)
+ *    - ★ 关键：透明物体必须从远到近排序绘制
+ *
+ * ★ 本 Demo 演示的内容：
+ *   - Alpha 丢弃：使用 awesomeface.png 的透明区域
+ *   - 混合：多个半透明彩色窗口
+ *   - 透明排序：按摄像机距离从远到近排序
+ *   - 对比：开启/关闭混合时的差异
+ *
+ * 目标：理解 discard vs blend 的区别，掌握透明物体的正确渲染顺序。
+ */
+
+int runBlendingDemo()
+{
+    const unsigned int SCR_WIDTH  = 1000;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Blending | B:Blend G:Grass M:Mode Scroll:GrassScale",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 基础 OpenGL 设置 ==========
+    //
+    // ★ 启用深度测试（不透明物体需要）
+    //   但透明物体绘制时要关闭深度写入
+    //
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+
+    glEnable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);  // 本章不需要模板测试
+
+    // ★ 混合默认是关闭的，在渲染循环中根据需要开启
+    glDisable(GL_BLEND);
+
+    // ========== 4. 鼠标回调（FPS 视角） ==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 500.0, lastMY = 350.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) {
+            lastMX = xpos;
+            lastMY = ypos;
+            firstMouse = false;
+        }
+        double dx = xpos - lastMX;
+        double dy = lastMY - ypos;
+        lastMX = xpos;
+        lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // 普通着色器：不透明物体（地板 + 立方体）
+    //
+    Shader shader("shaders/coordinates/coordinate_system.vert",
+                  "shaders/textures/texture_combined.frag", true);
+
+    // Alpha 丢弃着色器：用于草叶/植被
+    //   片段着色器中使用 discard 丢弃透明像素
+    //
+    Shader discardShader("shaders/coordinates/coordinate_system.vert",
+                         "shaders/blending/blend_discard.frag", true);
+
+    // 半透明着色器：用于窗户/玻璃
+    //   输出带有 alpha 的颜色，配合 glBlendFunc 混合
+    //
+    Shader blendShader("shaders/blending/blend_alpha.vert",
+                       "shaders/blending/blend_transparent.frag", true);
+
+    // ========== 7. 地板平面数据 ==========
+    //
+    // 格式：[位置 xyz] [纹理坐标 uv] → 每个顶点 5 float
+    //
+    float planeVertices[] = {
+        // ---- 位置 ----------    -- uv ---
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+         5.0f, -0.51f, -5.0f,     3.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f
+    };
+
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 立方体数据 ==========
+    //
+    // 两个不透明的容器立方体
+    //
+    float cubeVertices[] = {
+        // ============ 背面 (Z-) ============
+        -0.5f, -0.5f, -0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+        // ============ 正面 (Z+) ============
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 1.0f,
+        // ============ 左面 (X-) ============
+        -0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,     1.0f, 1.0f,
+        // ============ 右面 (X+) ============
+         0.5f,  0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
+        // ============ 底面 (Y-) ============
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+        // ============ 顶面 (Y+) ============
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 0.0f
+    };
+
+    unsigned int cubeIndices[] = {
+         0,  2,  1,    2,  0,  3,
+         4,  5,  6,    6,  7,  4,
+         8,  9, 10,   10, 11,  8,
+        12, 14, 13,   14, 12, 15,
+        16, 17, 18,   18, 19, 16,
+        20, 22, 21,   22, 20, 23
+    };
+
+    unsigned int cubeVAO, cubeVBO, cubeEBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glGenBuffers(1, &cubeEBO);
+
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 通用四边形数据（用于草地 + 透明窗户） ==========
+    //
+    // 一个简单的正方形（2 个三角形），法线朝 Z+ 方向
+    // 格式：[位置 xyz] [纹理坐标 uv] → 每个顶点 5 float
+    //
+    // ★ 四边形顶点按 CCW 绕序（从 +Z 方向看），使正面朝向摄像机
+    //   修复前：CW 绕序 → 面剔除下正面不可见，只能从背后看到
+    //   修复后：CCW 绕序 → 正面可见，与 OpenGL 默认一致
+    float quadVertices[] = {
+        // ---- 位置 ----------    -- uv ---
+        -0.5f, -0.5f,  0.0f,      0.0f, 0.0f,   // 左下
+         0.5f,  0.5f,  0.0f,      1.0f, 1.0f,   // 右上
+         0.5f, -0.5f,  0.0f,      1.0f, 0.0f,   // 右下
+
+        -0.5f, -0.5f,  0.0f,      0.0f, 0.0f,   // 左下
+        -0.5f,  0.5f,  0.0f,      0.0f, 1.0f,   // 左上
+         0.5f,  0.5f,  0.0f,      1.0f, 1.0f    // 右上
+    };
+
+    unsigned int quadVAO, quadVBO;
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 10. 加载纹理 ==========
+    //
+    // marbleTex：大理石地板纹理（LearnOpenGL 官方资源）
+    // containerTex：立方体的木箱纹理
+    // grassTex：草地纹理（有 alpha 通道，官方 grass.png，用于 discard 演示）
+    // windowTex：半透明窗户纹理（官方 blending_transparent_window.png）
+    //
+    unsigned int marbleTex     = loadTexture("textures/marble.jpg", true);
+    unsigned int containerTex  = loadTexture("textures/container.jpg");
+
+    // ★ 用于 alpha discard 的草地纹理 — 需要 alpha 通道
+    unsigned int grassTex = loadTexture("textures/grass.png", true);
+
+    // ★ 关键：为避免 discard 的边缘伪影，设环绕模式为 CLAMP
+    glBindTexture(GL_TEXTURE_2D, grassTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // ★ 用于半透明混合的窗户纹理
+    unsigned int windowTex = loadTexture("textures/window.png", true);
+    glBindTexture(GL_TEXTURE_2D, windowTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // ========== 11. 纹理单元 ==========
+    shader.use();
+    shader.setInt("texture1", 0);
+    shader.setInt("texture2", 1);
+
+    discardShader.use();
+    discardShader.setInt("texture1", 0);
+
+    blendShader.use();
+    blendShader.setInt("texture1", 0);
+
+    // ========== 12. 场景物体位置 ==========
+
+    // ---- 不透明立方体 ----
+    struct { glm::vec3 pos; float rotAngle; glm::vec3 rotAxis; } cubes[] = {
+        { glm::vec3(-0.8f, 0.01f, -2.5f),  20.0f, glm::vec3(1.0f, 0.3f, 0.5f) },
+        { glm::vec3( 0.8f, 0.01f, -3.5f),  35.0f, glm::vec3(0.2f, 1.0f, 0.4f) },
+    };
+    const int NUM_CUBES = 2;
+
+    // ---- 草地四边形（alpha discard） ----
+    // 两个面朝摄像机的"草牌"，展示 discard 效果
+    //
+    struct { glm::vec3 pos; float yRot; float scale; } grasses[] = {
+        { glm::vec3(-1.5f,  0.3f, -2.0f),  15.0f, 1.2f },
+        { glm::vec3( 1.2f,  0.3f, -2.8f), -20.0f, 1.0f },
+        { glm::vec3( 0.0f,  0.3f, -3.2f),  45.0f, 1.3f },
+    };
+    const int NUM_GRASSES = 3;
+
+    // ---- 透明窗户（半透明混合） ----
+    // 多个半透明窗户四边形（使用官方 window.png 纹理），分布在不同深度
+    //
+    struct WindowDef {
+        glm::vec3 pos;
+        float     yRot;
+        glm::vec3 scale;
+        const char* label;
+    };
+    WindowDef windows[] = {
+        // 窗户 1 — 最近
+        { glm::vec3(-1.5f,  0.5f, -1.5f),   0.0f, glm::vec3(1.2f, 1.5f, 1.0f), "Near"      },
+        // 窗户 2 — 中间
+        { glm::vec3( 0.0f,  0.5f, -2.2f),   0.0f, glm::vec3(1.2f, 1.5f, 1.0f), "Mid"       },
+        // 窗户 3 — 远
+        { glm::vec3( 1.5f,  0.5f, -2.8f),   0.0f, glm::vec3(1.2f, 1.5f, 1.0f), "Far"       },
+        // 窗户 4 — 地板和立方体之间
+        { glm::vec3(-0.5f,  0.3f, -3.5f),  25.0f, glm::vec3(1.2f, 1.5f, 1.0f), "Farthest"  },
+    };
+    const int NUM_WINDOWS = 4;
+
+    // ========== 13. 用户控制参数 ==========
+
+    // ---- 混合 ----
+    bool  blendEnabled   = true;    // 是否启用混合
+    bool  showGrass      = true;    // 是否显示草地（discard）
+
+    // ---- 混合模式 ----
+    // 0: GL_FUNC_ADD (默认叠加)
+    // 1: GL_FUNC_SUBTRACT
+    // 2: GL_FUNC_REVERSE_SUBTRACT
+    int   blendEqMode    = 0;
+    const char* blendEqNames[] = {
+        "GL_FUNC_ADD (默认叠加)",
+        "GL_FUNC_SUBTRACT (源减目标)",
+        "GL_FUNC_REVERSE_SUBTRACT (目标减源)"
+    };
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos     = glm::vec3(0.0f, 1.5f, 5.5f);
+    float     fov        = 50.0f;
+    float     moveSpeed  = 0.08f;
+
+    // ---- 调试 ----
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 14. 清屏设置 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 15. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  混合（Blending）— Alpha 丢弃 & 半透明" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           → 退出" << std::endl;
+    std::cout << "  WASD / 箭头   → 前后左右移动" << std::endl;
+    std::cout << "  右键拖动       → 旋转视角" << std::endl;
+    std::cout << "  B             → 切换混合 开/关" << std::endl;
+    std::cout << "  G             → 切换草地显示（discard）" << std::endl;
+    std::cout << "  M             → 切换混合方程模式" << std::endl;
+    std::cout << "  鼠标滚轮       → 调整草地缩放" << std::endl;
+    std::cout << "  Tab           → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 16. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 16a. 计算 deltaTime =====
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ===== 16b. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // ---- B 键：切换混合 ----
+        static bool bPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS)
+        {
+            if (!bPressed) {
+                blendEnabled = !blendEnabled;
+                std::cout << (blendEnabled ? "🎨 混合: 启用（窗户半透明）" : "🎨 混合: 禁用（窗户变为不透明）") << std::endl;
+                bPressed = true;
+            }
+        }
+        else { bPressed = false; }
+
+        // ---- G 键：切换草地显示 ----
+        static bool gPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS)
+        {
+            if (!gPressed) {
+                showGrass = !showGrass;
+                std::cout << (showGrass ? "🌿 草地（discard）: 可见" : "🌿 草地（discard）: 隐藏") << std::endl;
+                gPressed = true;
+            }
+        }
+        else { gPressed = false; }
+
+        // ---- M 键：切换混合方程 ----
+        static bool mPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS)
+        {
+            if (!mPressed) {
+                blendEqMode = (blendEqMode + 1) % 3;
+                std::cout << "🎨 混合方程: " << blendEqNames[blendEqMode] << std::endl;
+                mPressed = true;
+            }
+        }
+        else { mPressed = false; }
+
+        // ---- 鼠标滚轮：调整草地缩放 ----
+        static float grassScale = 1.0f;
+        float mouseWheel = io.MouseWheel;
+        if (mouseWheel != 0.0f)
+        {
+            grassScale += mouseWheel * 0.1f;
+            grassScale = glm::clamp(grassScale, 0.5f, 2.5f);
+            std::cout << "🌿 草地缩放: " << grassScale << std::endl;
+        }
+
+        // ---- WASD / 箭头键：摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += right * velocity;
+
+        // ---- Tab 键：切换面板 ----
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        // ===== 16c. 清空缓冲 =====
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ===== 16d. ImGui 新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 16e. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染不透明物体（地板 + 立方体）
+        // ================================================================
+        //
+        // ★ 不透明物体必须先绘制，这样深度缓冲区中才有完整信息
+        //   混合的透明物体需要知道"背后有什么"
+        //
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);  // 不透明物体正常写入深度
+
+        shader.use();
+        shader.setMat4("projection", projection);
+        shader.setMat4("view", view);
+
+        // ---- 地板 ----
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, marbleTex);   // ★ 官方 marble.jpg 大理石地板
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, marbleTex);
+
+        glm::mat4 planeModel = glm::mat4(1.0f);
+        shader.setMat4("model", planeModel);
+        glBindVertexArray(planeVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // ---- 立方体 ----
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+
+        glBindVertexArray(cubeVAO);
+        for (int i = 0; i < NUM_CUBES; i++)
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubes[i].pos);
+            model = glm::rotate(model, glm::radians(cubes[i].rotAngle), cubes[i].rotAxis);
+            shader.setMat4("model", model);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // ================================================================
+        // 第二部分：渲染草地（Alpha Discard）
+        // ================================================================
+        //
+        // ★ discard 的物体不需要排序 — 非丢弃的像素正常写入深度缓冲区，
+        //   丢弃的像素不写入任何东西。
+        //   所以 discard 物体可以在透明混合之前绘制，顺序无所谓。
+        //
+        // ★ discard 物体也不需要使用混合，因为片段要么完全可见，
+        //   要么完全被丢弃。
+        //
+        if (showGrass)
+        {
+            // 不透明物体已写入深度，保持深度写入开启
+            glDisable(GL_BLEND);
+            glDepthMask(GL_TRUE);
+
+            discardShader.use();
+            discardShader.setMat4("projection", projection);
+            discardShader.setMat4("view", view);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, grassTex);  // ★ 官方 grass.png 纹理
+
+            glBindVertexArray(quadVAO);
+
+            for (int i = 0; i < NUM_GRASSES; i++)
+            {
+                glm::mat4 model = glm::mat4(1.0f);
+                model = glm::translate(model, grasses[i].pos);
+                // ★ 旋转使四边形始终面朝摄像机（Billboarding 效果）
+                model = glm::rotate(model, glm::radians(camYaw + grasses[i].yRot), glm::vec3(0.0f, 1.0f, 0.0f));
+                model = glm::scale(model, glm::vec3(grasses[i].scale * grassScale));
+
+                discardShader.setMat4("model", model);
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+            }
+        }
+
+        // ================================================================
+        // 第三部分：渲染透明窗户（Blending）
+        // ================================================================
+        //
+        // ★ 混合的核心规则：
+        //   1. 先绘制所有不透明物体（已完成）
+        //   2. 对透明物体按摄像机距离排序（从远到近）
+        //   3. 关闭深度写入（glDepthMask(GL_FALSE)）
+        //       — 透明物体不应阻挡后面的透明物体
+        //   4. 从远到近依次绘制
+        //
+        // ★ 为什么从远到近？
+        //   混合公式：result = src_alpha * src + (1-src_alpha) * dst
+        //   dst 是"已经绘制的内容"，所以远处的必须先画好，
+        //   近处的才能在它上面叠加混合。
+        //
+
+        // ---- 3a. 排序窗户（从远到近） ----
+        // 计算每个窗户到摄像机的距离，按距离降序排列
+        //
+        std::map<float, int> sortedWindows;  // distance → window index
+        for (int i = 0; i < NUM_WINDOWS; i++)
+        {
+            float distance = glm::length(camPos - windows[i].pos);
+            // ★ 用负距离作为 key 实现降序（远的在前）
+            //   即最远的 → 最大的距离 → 最小的负数 → 最先取出
+            sortedWindows[-distance] = i;
+        }
+
+        // ---- 3b. 启用混合并绘制 ----
+        //
+        // ★ 注意：如果混合被禁用，窗户会像不透明物体一样绘制
+        //   （按哪种顺序都可以，因为深度测试会处理遮挡）
+        //
+        if (blendEnabled) {
+            glEnable(GL_BLEND);
+        } else {
+            glDisable(GL_BLEND);
+        }
+
+        // 设置混合方程
+        switch (blendEqMode) {
+            case 0:
+                glBlendEquation(GL_FUNC_ADD);
+                break;
+            case 1:
+                glBlendEquation(GL_FUNC_SUBTRACT);
+                break;
+            case 2:
+                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+                break;
+        }
+
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // ★ 关闭深度写入！透明物体不应阻挡后面的透明物体
+        glDepthMask(GL_FALSE);
+
+        blendShader.use();
+        blendShader.setMat4("projection", projection);
+        blendShader.setMat4("view", view);
+        blendShader.setBool("useTexture", true);   // ★ 使用 window.png 纹理
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, windowTex);   // ★ 官方 blending_transparent_window.png
+
+        glBindVertexArray(quadVAO);
+
+        // 从远到近绘制（map 按 key 升序，负距离 → 最远的先出来）
+        for (auto& entry : sortedWindows)
+        {
+            int i = entry.second;
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, windows[i].pos);
+            model = glm::rotate(model, glm::radians(windows[i].yRot), glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::scale(model, windows[i].scale);
+
+            blendShader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        // ---- 3c. 恢复状态 ----
+        glDepthMask(GL_TRUE);   // 重新启用深度写入
+        glDisable(GL_BLEND);    // 关闭混合
+
+        // ===== 16f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Blending");
+
+            // ---- 性能 ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 混合核心控制 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Blending");
+
+            // 启用/禁用混合
+            if (ImGui::Checkbox("Enable Blending (B)", &blendEnabled))
+            {
+                // 不需要额外的 gl 调用，下一帧会处理
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled(blendEnabled ? "(ON)" : "(OFF)");
+
+            if (blendEnabled)
+            {
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f),
+                    "混合已启用 → 窗户半透明，按距离排序绘制");
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                    "混合已禁用 → 窗户变为不透明（无视 alpha）");
+            }
+            ImGui::Separator();
+
+            // ---- 混合参数 ----
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Blend Settings");
+
+            // 混合方程
+            if (ImGui::BeginCombo("Blend Equation (M)", blendEqNames[blendEqMode]))
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    bool selected = (blendEqMode == i);
+                    if (ImGui::Selectable(blendEqNames[i], selected))
+                    {
+                        blendEqMode = i;
+                        std::cout << "🎨 混合方程: " << blendEqNames[i] << std::endl;
+                    }
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::Text("glBlendFunc: GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA");
+            ImGui::Text("Result = src * alpha + dst * (1 - alpha)");
+            ImGui::TextDisabled("窗户使用官方 window.png 纹理（自带 alpha）");
+            ImGui::Separator();
+
+            // ---- 窗户信息 ----
+            ImGui::TextColored(ImVec4(0.8f, 0.6f, 1.0f, 1.0f), "Windows (sorted back→front)");
+            std::map<float, int> displaySorted;
+            for (int i = 0; i < NUM_WINDOWS; i++)
+                displaySorted[-glm::length(camPos - windows[i].pos)] = i;
+            for (auto& entry : displaySorted)
+            {
+                int i = entry.second;
+                float dist = glm::length(camPos - windows[i].pos);
+                ImGui::Text("  %s: dist=%.1f", windows[i].label, dist);
+            }
+            ImGui::Separator();
+
+            // ---- 草地控制 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Vegetation (Discard)");
+            ImGui::Checkbox("Show Grass (G)", &showGrass);
+            ImGui::TextDisabled(
+                "使用 discard 丢弃 alpha < 0.1 的片段。\n"
+                "纹理：grass.png（CLAMP_TO_EDGE 环绕）\n"
+                "滚轮调整缩放: %.1f", grassScale);
+            ImGui::Separator();
+
+            // ---- 渲染顺序说明 ----
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "Rendering Order");
+            ImGui::TextDisabled(
+                "1. Floor + Cubes (opaque, depth writes ON)\n"
+                "2. Grass quads (discard, depth writes ON)\n"
+                "3. Windows (blended, depth writes OFF, sorted)");
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled(
+                "WASD/Arrows: Move       |  RClick+Drag: Look\n"
+                "B: Toggle blending       |  G: Toggle grass\n"
+                "M: Blend equation mode   |  Scroll: Window alpha\n"
+                "Tab: Panel               |  ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 16g. ImGui 渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // ===== 16h. 交换缓冲 =====
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 17. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &cubeEBO);
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteTextures(1, &marbleTex);
+    glDeleteTextures(1, &containerTex);
+    glDeleteTextures(1, &grassTex);
+    glDeleteTextures(1, &windowTex);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数 — 章节选择器
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 模板测试（Stencil Testing）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 混合（Blending）" << std::endl;
+    return runBlendingDemo();
     return runStencilTestingDemo();
     return runDepthTestingDemo();
     return runModelLoadingDemo();
