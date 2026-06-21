@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：面剔除（Face Culling）
+ *  当前学习章节：帧缓冲（Framebuffers）
  * ============================================================
  */
 
@@ -6496,14 +6496,559 @@ int runFaceCullingDemo()
 }
 
 
+// ╔══════════════════════════════════════════════════════════════╗
+// ║              帧缓冲（Framebuffers）Demo                      ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+int runFramebuffersDemo()
+{
+    const unsigned int SCR_WIDTH  = 1000;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Framebuffers | 1-6:Effect F:Flip Tab:Panel",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 基础 OpenGL 设置 ==========
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+
+    // ========== 4. 鼠标回调（FPS 视角） ==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 500.0, lastMY = 350.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) { lastMX = xpos; lastMY = ypos; firstMouse = false; }
+        double dx = xpos - lastMX, dy = lastMY - ypos;
+        lastMX = xpos; lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // 场景着色器：用于渲染 3D 场景（地板 + 立方体）
+    //
+    Shader sceneShader("shaders/coordinates/coordinate_system.vert",
+                       "shaders/textures/texture_combined.frag", true);
+
+    // 屏幕着色器：用于将 FBO 纹理渲染到全屏四边形，应用后处理
+    //
+    Shader screenShader("shaders/framebuffers/screen.vert",
+                        "shaders/framebuffers/screen.frag", true);
+
+    // ========== 7. 地板平面数据 ==========
+    float planeVertices[] = {
+        // ---- 位置 ----------    -- uv ---
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+         5.0f, -0.51f, -5.0f,     3.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f
+    };
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 立方体数据 ==========
+    float cubeVertices[] = {
+        -0.5f, -0.5f, -0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,     1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 0.0f
+    };
+    unsigned int cubeIndices[] = {
+         0,  2,  1,    2,  0,  3,    4,  5,  6,    6,  7,  4,
+         8,  9, 10,   10, 11,  8,   12, 14, 13,   14, 12, 15,
+        16, 17, 18,   18, 19, 16,   20, 22, 21,   22, 20, 23
+    };
+    unsigned int cubeVAO, cubeVBO, cubeEBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glGenBuffers(1, &cubeEBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 全屏四边形（后处理用） ==========
+    //
+    // NDC 坐标 + 纹理坐标，每顶点 4 个 float
+    // 直接绘制到整个屏幕，然后通过屏幕着色器应用后处理效果
+    //
+    float quadVertices[] = {
+        // ---- NDC 位置 --    -- 纹理坐标 --
+        -1.0f, -1.0f,          0.0f, 0.0f,   // 左下
+         1.0f, -1.0f,          1.0f, 0.0f,   // 右下
+         1.0f,  1.0f,          1.0f, 1.0f,   // 右上
+
+        -1.0f, -1.0f,          0.0f, 0.0f,   // 左下
+         1.0f,  1.0f,          1.0f, 1.0f,   // 右上
+        -1.0f,  1.0f,          0.0f, 1.0f    // 左上
+    };
+    unsigned int quadVAO, quadVBO;
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    // aPos (location = 0): vec2
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    // aTexCoord (location = 1): vec2
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 10. 加载纹理 ==========
+    unsigned int floorTex     = loadTexture("textures/marble.jpg", true);
+    unsigned int containerTex = loadTexture("textures/container.jpg");
+
+    // ========== 11. 纹理单元 ==========
+    sceneShader.use();
+    sceneShader.setInt("texture1", 0);
+    sceneShader.setInt("texture2", 1);
+
+    screenShader.use();
+    screenShader.setInt("screenTexture", 0);
+
+    // ========== 12. 创建帧缓冲（FBO） ==========
+    //
+    // ★ 帧缓冲 = 颜色附件（纹理） + 深度/模板附件（渲染缓冲对象 RBO）
+    //
+    // 步骤：
+    //   1. 创建 FBO
+    //   2. 创建颜色纹理附件
+    //   3. 创建深度+模板 RBO
+    //   4. 检查完整性
+    //
+    unsigned int fbo;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    // ---- 12a. 颜色附件：纹理 ----
+    //
+    // 将场景渲染到这个纹理上，后续采样它来做后处理
+    //
+    unsigned int texColorBuffer;
+    glGenTextures(1, &texColorBuffer);
+    glBindTexture(GL_TEXTURE_2D, texColorBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // 附加纹理到帧缓冲的颜色附件 0
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texColorBuffer, 0);
+
+    // ---- 12b. 深度+模板附件：渲染缓冲对象（RBO） ----
+    //
+    // RBO 比纹理更适合深度/模板：GPU 可以直接写入，不需要采样时更高效
+    //
+    unsigned int rbo;
+    glGenRenderbuffers(1, &rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCR_WIDTH, SCR_HEIGHT);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    // 附加 RBO 到帧缓冲
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+
+    // ---- 12c. 检查完整性 ----
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "✗ 帧缓冲不完整!" << std::endl;
+    else
+        std::cout << "✓ 帧缓冲创建成功 (" << SCR_WIDTH << "×" << SCR_HEIGHT << ")" << std::endl;
+
+    // 恢复默认帧缓冲
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // ========== 13. 场景物体位置 ==========
+    struct { glm::vec3 pos; float rotSpeed; glm::vec3 rotAxis; } cubes[] = {
+        { glm::vec3(-0.8f, 0.01f, -2.5f),  25.0f, glm::vec3(1.0f, 0.3f, 0.5f) },
+        { glm::vec3( 0.8f, 0.01f, -2.5f), -30.0f, glm::vec3(0.2f, 1.0f, 0.4f) },
+    };
+    const int NUM_CUBES = 2;
+
+    // ========== 14. 用户控制参数 ==========
+
+    // ---- 后处理效果 ----
+    // 0=Normal  1=Inversion  2=Grayscale  3=Sharpen  4=Blur  5=Edge
+    //
+    int   effect       = 0;       // 当前效果编号
+    bool  flipVertical = false;   // 上下翻转纹理（用于对比 FBO 与默认帧缓冲的区别）
+
+    const char* effectNames[] = {
+        "0 - Normal (直通)",
+        "1 - Inversion (反色)",
+        "2 - Grayscale (灰度)",
+        "3 - Sharpen (锐化)",
+        "4 - Blur (高斯模糊)",
+        "5 - Edge Detection (边缘检测)"
+    };
+    const char* effectHints[] = {
+        "原始画面，不做处理",
+        "所有颜色取反 (1 - color)，暗部变亮",
+        "感知加权灰度: 0.2126R + 0.7152G + 0.0722B",
+        "3×3 锐化卷积核，中心权重 9，周围 -1",
+        "3×3 高斯模糊核，近似 7×7 效果",
+        "3×3 拉普拉斯算子，中心 -8，检测亮度突变"
+    };
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos   = glm::vec3(0.0f, 1.5f, 5.0f);
+    float     fov      = 50.0f;
+    float     moveSpeed = 0.08f;
+
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 15. 清屏 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  帧缓冲（Framebuffers）— 后处理效果" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           → 退出" << std::endl;
+    std::cout << "  WASD / 箭头   → 前后左右移动" << std::endl;
+    std::cout << "  右键拖动       → 旋转视角" << std::endl;
+    std::cout << "  1 ~ 6         → 切换后处理效果" << std::endl;
+    std::cout << "  F             → 翻转纹理（对比 FBO 效果）" << std::endl;
+    std::cout << "  Tab           → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 16. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 16a. Delta time =====
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ===== 16b. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // ---- 1~6 键：切换后处理效果 ----
+        static bool k1Pressed = false, k2Pressed = false, k3Pressed = false;
+        static bool k4Pressed = false, k5Pressed = false, k6Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !k1Pressed) {
+            k1Pressed = true; effect = 0;
+            std::cout << "效果: " << effectNames[0] << std::endl;
+        } else k1Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !k2Pressed) {
+            k2Pressed = true; effect = 1;
+            std::cout << "效果: " << effectNames[1] << std::endl;
+        } else k2Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !k3Pressed) {
+            k3Pressed = true; effect = 2;
+            std::cout << "效果: " << effectNames[2] << std::endl;
+        } else k3Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS && !k4Pressed) {
+            k4Pressed = true; effect = 3;
+            std::cout << "效果: " << effectNames[3] << std::endl;
+        } else k4Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS && !k5Pressed) {
+            k5Pressed = true; effect = 4;
+            std::cout << "效果: " << effectNames[4] << std::endl;
+        } else k5Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS && !k6Pressed) {
+            k6Pressed = true; effect = 5;
+            std::cout << "效果: " << effectNames[5] << std::endl;
+        } else k6Pressed = false;
+
+        // ---- F 键：翻转纹理 ----
+        static bool fPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
+            if (!fPressed) {
+                flipVertical = !flipVertical;
+                std::cout << (flipVertical ? "↕ 纹理翻转: 开启（模拟 FBO 上下颠倒）" : "↕ 纹理翻转: 关闭") << std::endl;
+                fPressed = true;
+            }
+        } else fPressed = false;
+
+        // ---- Tab 键：切换面板 ----
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // ---- 摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) camPos += right * velocity;
+
+        // ===== 16c. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view       = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ============================================================
+        // ★ 第一遍：渲染场景到自定义帧缓冲
+        // ============================================================
+        //
+        // 绑定 FBO 后，所有绘制结果都写入 FBO 的颜色纹理
+        //
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);  // 场景渲染需要深度测试
+
+        sceneShader.use();
+        sceneShader.setMat4("projection", projection);
+        sceneShader.setMat4("view", view);
+
+        // ---- 地板 ----
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, floorTex);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, floorTex);
+
+        glm::mat4 planeModel = glm::mat4(1.0f);
+        sceneShader.setMat4("model", planeModel);
+        glBindVertexArray(planeVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // ---- 旋转立方体 ----
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+
+        glBindVertexArray(cubeVAO);
+        for (int i = 0; i < NUM_CUBES; i++) {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubes[i].pos);
+            model = glm::rotate(model, glm::radians(cubes[i].rotSpeed * currentFrame), cubes[i].rotAxis);
+            sceneShader.setMat4("model", model);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // ============================================================
+        // ★ 第二遍：渲染全屏四边形（后处理）
+        // ============================================================
+        //
+        // 恢复到默认帧缓冲（屏幕），用屏幕着色器采样 FBO 纹理
+        //
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);  // 全屏四边形不需要深度测试
+
+        screenShader.use();
+        screenShader.setInt("effect", effect);
+        screenShader.setFloat("time", currentFrame);
+
+        // 像素偏移量 = 1/纹理尺寸，用于 3×3 卷积核采样
+        screenShader.setFloat("texOffsetX", 1.0f / SCR_WIDTH);
+        screenShader.setFloat("texOffsetY", 1.0f / SCR_HEIGHT);
+
+        // 翻转纹理：uv.y = 1 - uv.y
+        // 通过修改 texOffsetY 的符号+偏移来模拟翻转
+        // 更简洁的做法在 shader 中，这里通过传入标记由 C++ 控制
+        if (flipVertical)
+            screenShader.setFloat("texOffsetY", -1.0f / SCR_HEIGHT);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texColorBuffer);
+        glBindVertexArray(quadVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // 恢复深度测试（下一帧场景渲染需要）
+        glEnable(GL_DEPTH_TEST);
+
+        // ============================================================
+        // ImGui 面板
+        // ============================================================
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel) {
+            ImGui::Begin("Debug Panel - Framebuffers");
+
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 后处理效果 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ Post-Processing Effect");
+            ImGui::Spacing();
+
+            for (int i = 0; i < 6; i++) {
+                char label[64];
+                snprintf(label, sizeof(label), "%s##effect%d", effectNames[i], i);
+                if (ImGui::RadioButton(label, effect == i)) {
+                    effect = i;
+                    std::cout << "效果: " << effectNames[i] << std::endl;
+                }
+            }
+            ImGui::Separator();
+
+            // 当前效果提示
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "%s", effectHints[effect]);
+            ImGui::Separator();
+
+            // ---- 纹理翻转 ----
+            ImGui::Checkbox("Flip Vertical (F)", &flipVertical);
+            if (flipVertical) {
+                ImGui::TextDisabled("FBO 纹理上下翻转，模拟 OpenGL 纹理坐标系与屏幕坐标系的差异");
+            }
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled(
+                "1-6: Switch effect   |  F: Flip texture\n"
+                "Tab: Toggle panel    |  ESC: Exit\n"
+                "WASD/Arrows: Move    |  RClick+Drag: Look");
+
+            ImGui::End();
+        }
+
+        // ImGui 渲染
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 17. 清理 ==========
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &cubeEBO);
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteTextures(1, &floorTex);
+    glDeleteTextures(1, &containerTex);
+    glDeleteTextures(1, &texColorBuffer);
+    glDeleteRenderbuffers(1, &rbo);
+    glDeleteFramebuffers(1, &fbo);
+    glfwTerminate();
+    return 0;
+}
+
+
 // ================================================================
 // 主函数 — 章节选择器
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 面剔除（Face Culling）" << std::endl;
-    return runFaceCullingDemo();
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 帧缓冲（Framebuffers）" << std::endl;
+    return runFramebuffersDemo();
     return runBlendingDemo();
     return runStencilTestingDemo();
     return runDepthTestingDemo();
