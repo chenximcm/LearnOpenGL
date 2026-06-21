@@ -1,7 +1,7 @@
 /**
  * ============================================================
- *  LearnOpenGL — 坐标系统（Coordinate Systems）
- *  当前学习章节：MVP 矩阵变换 + 3D 立方体 + ImGui 调试面板
+ *  LearnOpenGL — 高级 OpenGL
+ *  当前学习章节：模板测试（Stencil Testing）— 物体描边
  * ============================================================
  */
 
@@ -4513,12 +4513,691 @@ int runDepthTestingDemo()
 
 
 // ================================================================
+// 第十七章：模板测试（Stencil Testing）—— 物体描边
+// ================================================================
+
+/**
+ * ============================================================
+ *  第十七章：模板测试（Stencil Testing）
+ * ============================================================
+ *
+ * 模板测试是 OpenGL 高级部分的第二章（紧接深度测试）。
+ *
+ * ★ 模板缓冲区（Stencil Buffer）
+ *   - 每个像素通常 8 位（256 种模板值）
+ *   - 模板缓冲区与颜色缓冲区、深度缓冲区分辨率相同
+ *   - 可以根据已绘制物体的"形状"来丢弃/保留后续的片段
+ *
+ * ★ 本 Demo 演示的经典应用：物体描边（Object Outlining）
+ *   - 类似建模软件中选中物体的高亮边框效果
+ *   - 三步走：
+ *       Pass 1: 正常绘制场景（不写模板）
+ *       Pass 2: 绘制物体 → 将其模板值写为 1（标记"这里有物体"）
+ *       Pass 3: 放大物体 + 纯色着色器 + 只在模板值 ≠ 1 处绘制
+ *               → 由于放大的物体在原物体之外是"新区域"（模板=0），
+ *                  这些区域通过测试，被绘制 → 形成边框
+ *
+ * ★ 核心 API：
+ *   - glStencilFunc(func, ref, mask)  — 设定模板测试比较函数
+ *   - glStencilOp(sfail, dpfail, dppass) — 设定测试结果的动作
+ *   - glStencilMask(mask)              — 控制写入模板值的位掩码
+ *
+ * 目标：理解模板测试的工作原理，掌握物体描边技术。
+ */
+
+int runStencilTestingDemo()
+{
+    const unsigned int SCR_WIDTH  = 1000;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    // ★ 关键：请求 8 位模板缓冲区
+    //   如果不设置此 Hint，GLFW 默认不分配模板缓冲区 → 模板测试失效
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Stencil Testing | Object Outlining | T:toggle O:outline C:color",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 基础 OpenGL 设置 ==========
+    //
+    // ★ 同时启用深度测试和模板测试
+    //   模板测试发生在片段着色器之后、混合之前，
+    //   与深度测试在同一管线阶段（两者同时起作用）。
+    //
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);    // 默认深度函数
+
+    glEnable(GL_STENCIL_TEST);
+    // 模板测试默认值：
+    //   glStencilFunc(GL_ALWAYS, 0, 0xFF)  — 始终通过，参考值=0，掩码=全位
+    //   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP) — 不修改模板值
+    //   glStencilMask(0xFF)                 — 允许写入所有位
+
+    glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+
+    // ★ 设置清屏用的模板值（默认是 0，显式写出）
+    glClearStencil(0);
+
+    // ========== 4. 鼠标回调（FPS 视角） ==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 500.0, lastMY = 350.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) {
+            lastMX = xpos;
+            lastMY = ypos;
+            firstMouse = false;
+        }
+        double dx = xpos - lastMX;
+        double dy = lastMY - ypos;
+        lastMX = xpos;
+        lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // 普通着色器：带纹理的场景渲染
+    //   顶点：MVP + 纹理坐标输出
+    //   片段：双纹理混合
+    //
+    Shader shader("shaders/coordinates/coordinate_system.vert",
+                  "shaders/textures/texture_combined.frag", true);
+
+    // 描边着色器：纯色输出，用于物体描边
+    //   顶点：仅 MVP 变换（不需要纹理坐标）
+    //   片段：输出纯色
+    //
+    Shader outlineShader("shaders/stencil_testing/stencil_single_color.vert",
+                         "shaders/stencil_testing/stencil_outline.frag", true);
+
+    // ========== 7. 地板平面数据 ==========
+    //
+    // 大四边形作为地面，y = -0.51（略低于立方体底面 y = -0.5）
+    // 格式：[位置 xyz] [纹理坐标 uv] → 每个顶点 5 float
+    //
+    float planeVertices[] = {
+        // ---- 位置 ----------    -- uv ---
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+         5.0f, -0.51f, -5.0f,     3.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f
+    };
+
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 立方体数据（带纹理坐标） ==========
+    //
+    // 复用深度测试章节的顶点格式：5 floats/vertex = [位置 xyz] [纹理坐标 uv]
+    // 完整立方体：6 面 × 4 顶点 = 24 顶点（非共享，为了正确的法线/UV）
+    //
+    float cubeVertices[] = {
+        // ============ 背面 (Z- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+        // ============ 正面 (Z+ 方向) ============
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 左面 (X- 方向) ============
+        -0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,        0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,        1.0f, 1.0f,
+        // ============ 右面 (X+ 方向) ============
+         0.5f,  0.5f,  0.5f,        0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        0.0f, 1.0f,
+        // ============ 底面 (Y- 方向) ============
+        -0.5f, -0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,        0.0f, 0.0f,
+        // ============ 顶面 (Y+ 方向) ============
+        -0.5f,  0.5f, -0.5f,        0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,        1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,        1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,        0.0f, 0.0f
+    };
+
+    unsigned int cubeIndices[] = {
+         0,  2,  1,    2,  0,  3,   // 背面
+         4,  5,  6,    6,  7,  4,   // 正面
+         8,  9, 10,   10, 11,  8,   // 左面
+        12, 14, 13,   14, 12, 15,   // 右面
+        16, 17, 18,   18, 19, 16,   // 底面
+        20, 22, 21,   22, 20, 23    // 顶面
+    };
+
+    unsigned int cubeVAO, cubeVBO, cubeEBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glGenBuffers(1, &cubeEBO);
+
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 加载纹理 ==========
+    //
+    // 地板 → floor.jpg（金属板纹理）
+    // 立方体 → container.jpg（木箱纹理）
+    //
+    unsigned int floorTex     = loadTexture("textures/floor.jpg", true);
+    unsigned int containerTex = loadTexture("textures/container.jpg");
+
+    // ========== 10. 设置纹理单元 ==========
+    shader.use();
+    shader.setInt("texture1", 0);
+    shader.setInt("texture2", 1);
+
+    // ========== 11. 立方体位置 ==========
+    //
+    // 两个立方体：一近一远，用于展示描边效果
+    // cube.y = 0.01 避免立方体底面和地板 Z-fighting
+    //
+    struct { glm::vec3 pos; float rotAngle; glm::vec3 rotAxis; } cubes[] = {
+        { glm::vec3(-0.8f, 0.01f, -2.5f), 20.0f, glm::vec3(1.0f, 0.3f, 0.5f) },
+        { glm::vec3( 0.8f, 0.01f, -3.5f), 35.0f, glm::vec3(0.2f, 1.0f, 0.4f) },
+    };
+    const int NUM_CUBES = 2;
+
+    // ========== 12. 描边颜色预设 ==========
+    //
+    // 可循环切换的描边颜色列表
+    //
+    struct OutlineColor {
+        glm::vec3 color;
+        const char* name;
+    };
+    const OutlineColor outlineColors[] = {
+        { glm::vec3(1.00f, 0.84f, 0.00f), "Gold (金色)"       },   // 教程推荐色
+        { glm::vec3(0.04f, 0.28f, 0.26f), "Teal (青绿色)"     },   // 教程默认
+        { glm::vec3(1.00f, 0.27f, 0.00f), "Orange (橙色)"     },
+        { glm::vec3(0.00f, 1.00f, 0.50f), "Mint (薄荷绿)"     },
+        { glm::vec3(1.00f, 0.08f, 0.58f), "Hot Pink (亮粉)"   },
+        { glm::vec3(0.00f, 0.75f, 1.00f), "Sky Blue (天蓝)"   },
+    };
+    const int NUM_COLORS = sizeof(outlineColors) / sizeof(outlineColors[0]);
+    int currentColorIdx = 0;
+
+    // ========== 13. 用户控制参数 ==========
+
+    // ---- 模板测试 ----
+    bool  stencilTestEnabled = true;
+    bool  showOutline        = true;
+
+    // ---- 描边 ----
+    float outlineScale  = 0.08f;  // 描边宽度（放大倍数，0.05 ~ 0.15 合适）
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos     = glm::vec3(0.0f, 1.5f, 5.0f);
+    float     fov        = 50.0f;
+    float     moveSpeed  = 0.08f;
+
+    // ---- 调试 ----
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 14. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 15. 控制提示 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  模板测试（Stencil Testing）— 物体描边" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           → 退出" << std::endl;
+    std::cout << "  WASD / 箭头   → 前后左右移动" << std::endl;
+    std::cout << "  右键拖动       → 旋转视角" << std::endl;
+    std::cout << "  T             → 切换模板测试 开/关" << std::endl;
+    std::cout << "  O             → 切换描边 开/关" << std::endl;
+    std::cout << "  C             → 切换描边颜色" << std::endl;
+    std::cout << "  鼠标滚轮       → 调整描边宽度" << std::endl;
+    std::cout << "  Tab           → 显示/隐藏调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 16. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        // ===== 16a. 计算 deltaTime =====
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ===== 16b. 输入处理 =====
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // ---- T 键：切换模板测试（★ 用 T 不用 S，避免和 WASD 中 S 后退冲突） ----
+        static bool tPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS)
+        {
+            if (!tPressed)
+            {
+                stencilTestEnabled = !stencilTestEnabled;
+                if (stencilTestEnabled) {
+                    glEnable(GL_STENCIL_TEST);
+                    std::cout << "🖊  模板测试: 启用" << std::endl;
+                } else {
+                    glDisable(GL_STENCIL_TEST);
+                    std::cout << "🖊  模板测试: 禁用（描边效果消失）" << std::endl;
+                }
+                tPressed = true;
+            }
+        }
+        else { tPressed = false; }
+
+        // ---- O 键：切换描边可见性 ----
+        static bool oPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS)
+        {
+            if (!oPressed) {
+                showOutline = !showOutline;
+                std::cout << (showOutline ? "🖊  描边: 可见" : "🖊  描边: 隐藏") << std::endl;
+                oPressed = true;
+            }
+        }
+        else { oPressed = false; }
+
+        // ---- C 键：切换描边颜色 ----
+        static bool cPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS)
+        {
+            if (!cPressed) {
+                currentColorIdx = (currentColorIdx + 1) % NUM_COLORS;
+                std::cout << "🖊  描边颜色: " << outlineColors[currentColorIdx].name << std::endl;
+                cPressed = true;
+            }
+        }
+        else { cPressed = false; }
+
+        // ---- 鼠标滚轮：调整描边宽度 ----
+        // ★ 通过 ImGui IO 来检测滚轮（ImGui 会捕获滚轮事件）
+        float mouseWheel = io.MouseWheel;
+        if (mouseWheel != 0.0f)
+        {
+            outlineScale += mouseWheel * 0.01f;
+            outlineScale = glm::clamp(outlineScale, 0.02f, 0.25f);
+            std::cout << "🖊  描边宽度: " << outlineScale << std::endl;
+        }
+
+        // ---- WASD / 箭头键：摄像机移动（S 是后退，同时触发模板切换是设计如此） ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            camPos += right * velocity;
+
+        // ---- Tab 键：切换面板 ----
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+        {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        }
+        else { tabPressed = false; }
+
+        // ===== 16c. 清空缓冲 =====
+        //
+        // ★ 关键区别：加上 GL_STENCIL_BUFFER_BIT
+        //   每次帧都需要清空模板缓冲区，否则上一帧的模板值会残留
+        //
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+
+        // ===== 16d. ImGui：开始新帧 =====
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ===== 16e. MVP 矩阵 =====
+        glm::mat4 projection = glm::perspective(
+            glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT,
+            0.1f, 100.0f
+        );
+        glm::mat4 view = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ================================================================
+        // 第一部分：渲染地板（不参与模板写入）
+        // ================================================================
+        //
+        // ★ 地板的模板值始终为 0（通过 glClear 清空为 0）
+        //   地板不应该被描边，所以不需要写入模板缓冲区
+        //
+        shader.use();
+        shader.setMat4("projection", projection);
+        shader.setMat4("view", view);
+
+        // ★ 禁止写入模板缓冲（地板不参与模板标记）
+        glStencilMask(0x00);
+
+        // 绑定纹理
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, floorTex);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, floorTex);
+
+        // 绘制地板
+        glm::mat4 planeModel = glm::mat4(1.0f);
+        shader.setMat4("model", planeModel);
+        glBindVertexArray(planeVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // ================================================================
+        // 第二部分：绘制立方体（正常渲染 + 写入模板值 1）
+        // ================================================================
+        //
+        // ★ 模板测试设置为：
+        //   - glStencilFunc(GL_ALWAYS, 1, 0xFF)：片段始终通过测试，参考值=1
+        //   - glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)：
+        //       深度测试通过 → 用参考值 1 替换模板缓冲区中的值
+        //       这样就"标记"了物体占据的像素
+        //   - glStencilMask(0xFF)：允许写入全部 8 位
+        //
+        // ★ glStencilFunc 中的参考值（ref=1）与 glStencilOp 中 GL_REPLACE
+        //   配合使用：当两个测试都通过时，将 ref 值写入模板缓冲区
+        //
+        glStencilFunc(GL_ALWAYS, 1, 0xFF);     // 始终通过，参考值=1
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);  // 深度通过→写入 ref=1
+        glStencilMask(0xFF);                    // 允许写入模板值
+
+        // 绑定立方体纹理
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, containerTex);
+
+        glBindVertexArray(cubeVAO);
+
+        for (int i = 0; i < NUM_CUBES; i++)
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubes[i].pos);
+            model = glm::rotate(model, glm::radians(cubes[i].rotAngle), cubes[i].rotAxis);
+
+            shader.setMat4("model", model);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // ================================================================
+        // 第三部分：绘制描边（放大的立方体 + 纯色着色器）
+        // ================================================================
+        //
+        // ★ 只在 showOutline 启用时才绘制描边
+        // ★ 模板测试设置为：
+        //   - glStencilFunc(GL_NOTEQUAL, 1, 0xFF)：模板值 ≠ 1 时才通过
+        //       原始物体的区域模板值为 1 → 被排除
+        //       放大部分超出原始物体的区域模板值为 0 → 通过测试 → 被绘制
+        //       结果：只有边框（放大部分减去原始部分）被绘制
+        //
+        //   - glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)：不修改模板值
+        //       描边不应该改变模板缓冲区的值
+        //
+        //   - glStencilMask(0x00)：禁止写入模板缓冲
+        //
+        // ★ glDisable(GL_DEPTH_TEST)：禁用深度测试
+        //   确保描边不会被其他物体遮挡（描边应该始终可见）
+        //
+        if (showOutline)
+        {
+            glStencilFunc(GL_NOTEQUAL, 1, 0xFF);   // 模板值 ≠ 1 → 通过
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP); // 不修改模板值
+            glStencilMask(0x00);                     // 禁止写入
+
+            glDisable(GL_DEPTH_TEST);                // 描边不应被遮挡
+
+            outlineShader.use();
+            outlineShader.setMat4("projection", projection);
+            outlineShader.setMat4("view", view);
+            outlineShader.setVec3("outlineColor", outlineColors[currentColorIdx].color);
+
+            glBindVertexArray(cubeVAO);
+
+            for (int i = 0; i < NUM_CUBES; i++)
+            {
+                // ★ 关键：在局部空间放大模型
+                //   translate * rotate * scale(outlineScale+1)
+                //   放大的是物体本身，所以边框是均匀的
+                //
+                glm::mat4 model = glm::mat4(1.0f);
+                model = glm::translate(model, cubes[i].pos);
+                model = glm::rotate(model, glm::radians(cubes[i].rotAngle), cubes[i].rotAxis);
+                model = glm::scale(model, glm::vec3(1.0f + outlineScale));
+
+                outlineShader.setMat4("model", model);
+                glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+            }
+
+            // ★ 恢复深度测试
+            glEnable(GL_DEPTH_TEST);
+        }
+
+        // ★ 恢复模板测试到默认状态（供下一帧使用）
+        glStencilFunc(GL_ALWAYS, 0, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glStencilMask(0xFF);
+
+        // ===== 16f. ImGui 调试面板 =====
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Stencil Testing");
+
+            // ---- 性能 ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 模板测试核心概念 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Stencil Test — 物体描边");
+
+            // 启用/禁用模板测试
+            if (ImGui::Checkbox("Enable Stencil Test (T)", &stencilTestEnabled))
+            {
+                if (stencilTestEnabled) {
+                    glEnable(GL_STENCIL_TEST);
+                } else {
+                    glDisable(GL_STENCIL_TEST);
+                }
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled(stencilTestEnabled ? "(ON)" : "(OFF)");
+
+            // 模板测试状态说明
+            if (!stencilTestEnabled)
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                    "模板测试已禁用 → 描边效果失效（所有片段通过）");
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f),
+                    "模板测试已启用 → Pass 2 标记物体区域，Pass 3 绘制边框");
+            }
+            ImGui::Separator();
+
+            // ---- 描边控制 ----
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Outline Settings");
+
+            ImGui::Checkbox("Show Outline (O)", &showOutline);
+
+            // 描边颜色
+            ImGui::Text("Outline Color:");
+            if (ImGui::BeginCombo("##outlineColor", outlineColors[currentColorIdx].name))
+            {
+                for (int i = 0; i < NUM_COLORS; i++)
+                {
+                    bool selected = (currentColorIdx == i);
+                    // 用颜色预览
+                    ImVec4 colorPreview(outlineColors[i].color.r,
+                                        outlineColors[i].color.g,
+                                        outlineColors[i].color.b, 1.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Text, colorPreview);
+                    if (ImGui::Selectable(outlineColors[i].name, selected))
+                    {
+                        currentColorIdx = i;
+                        std::cout << "🖊  描边颜色: " << outlineColors[i].name << std::endl;
+                    }
+                    ImGui::PopStyleColor();
+                    if (selected) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+
+            // 描边宽度
+            if (ImGui::SliderFloat("Outline Scale (Scroll)", &outlineScale, 0.02f, 0.25f, "%.3f"))
+            {
+                // 值已在 slider 中更新
+            }
+            ImGui::TextDisabled("Scale = %.3f  → 物体放大 %.1f%%",
+                outlineScale, outlineScale * 100.0f);
+            ImGui::Separator();
+
+            // ---- 当前模板状态 ----
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Current Stencil State");
+            ImGui::TextDisabled(
+                "Pass 1 (Floor):    stencilMask=0x00, no write\n"
+                "Pass 2 (Objects):  func=GL_ALWAYS, ref=1, op=GL_REPLACE\n"
+                "Pass 3 (Outline):  func=GL_NOTEQUAL, ref=1, no depth test");
+            ImGui::Separator();
+
+            // ---- 摄像机控制 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Text("Position: (%.1f, %.1f, %.1f)", camPos.x, camPos.y, camPos.z);
+            ImGui::Separator();
+
+            // ---- 清屏色 ----
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // ---- 操作帮助 ----
+            ImGui::TextDisabled(
+                "WASD/Arrows: Move      |  RClick+Drag: Look\n"
+                "T: Toggle stencil test  |  O: Toggle outline\n"
+                "C: Cycle outline color  |  Scroll: Outline width\n"
+                "Tab: Panel              |  ESC: Quit");
+
+            ImGui::End();
+        }
+
+        // ===== 16g. ImGui：渲染 =====
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // ===== 16h. 交换缓冲 + 事件处理 =====
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 17. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &cubeEBO);
+    glDeleteTextures(1, &floorTex);
+    glDeleteTextures(1, &containerTex);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数 — 章节选择器
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 深度测试（Depth Testing）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 模板测试（Stencil Testing）" << std::endl;
+    return runStencilTestingDemo();
     return runDepthTestingDemo();
     return runModelLoadingDemo();
     return runMultipleLightsDemo();
