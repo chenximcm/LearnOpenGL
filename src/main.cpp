@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：混合（Blending）— Alpha 丢弃 & 半透明渲染
+ *  当前学习章节：面剔除（Face Culling）
  * ============================================================
  */
 
@@ -5978,12 +5978,532 @@ int runBlendingDemo()
 
 
 // ================================================================
+// 第十九章：面剔除（Face Culling）
+// ================================================================
+
+/**
+ * ============================================================
+ *  第十九章：面剔除（Face Culling）
+ * ============================================================
+ *
+ * 面剔除是 OpenGL 高级部分第四章，解决"看不见的面要不要画"的问题。
+ *
+ * ★ 核心概念
+ *   在一个封闭的 3D 立方体中，你最多只能看到 3 个面（正面视角），
+ *   其余 3~5 个面背对着摄像机——画它们纯属浪费。
+ *   启用面剔除后，OpenGL 会检查每个三角形的朝向，丢弃朝"错误方向"的。
+ *
+ * ★ 关键 API
+ *   glEnable(GL_CULL_FACE)   — 启用面剔除
+ *   glCullFace(GL_BACK)      — 剔除背面（默认）
+ *   glCullFace(GL_FRONT)     — 剔除正面（能看到物体"内部"）
+ *   glFrontFace(GL_CCW)      — 声明 CCW 绕序 = 正面（默认）
+ *   glFrontFace(GL_CW)       — 声明 CW 绕序 = 正面
+ *
+ * ★ 绕序决定一切
+ *   三角形的顶点提交顺序决定了方向：
+ *      CCW（逆时针）= 正面（默认）
+ *      CW（顺时针）  = 背面
+ *   如果你的模型顶点绕序与默认不一致 → 正面被剔除 → 物体"消失"了
+ *
+ * ★ 本 Demo 演示的内容
+ *   - 默认 GL_BACK 剔除：正常的背面消除
+ *   - GL_FRONT 剔除：看到立方体内部（类似剖面效果）
+ *   - 绕序切换：反转 front face 定义
+ *   - 线框模式：可视化三角形的实际朝向
+ *
+ * 目标：理解面剔除的原理、掌握相关 API、识别绕序问题。
+ */
+
+int runFaceCullingDemo()
+{
+    const unsigned int SCR_WIDTH  = 1000;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Face Culling | F:Toggle 1/2/3:Mode Q:Wire R:Reverse",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "⨯ Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "⨯ Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 基础 OpenGL 设置 ==========
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_CULL_FACE);   // ★ 面剔除：默认剔除背面
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+
+    // ========== 4. 鼠标回调 ==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 500.0, lastMY = 350.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) { lastMX = xpos; lastMY = ypos; firstMouse = false; }
+        double dx = xpos - lastMX, dy = lastMY - ypos;
+        lastMX = xpos; lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    // ========== 6. 编译着色器 ==========
+    Shader shader("shaders/coordinates/coordinate_system.vert",
+                  "shaders/textures/texture_combined.frag", true);
+
+    // 纯色着色器（用于线框模式）
+    Shader solidShader("shaders/coordinates/coordinate_system.vert",
+                       "shaders/stencil_testing/stencil_outline.frag", true);
+
+    // ========== 7. 地板平面 ==========
+    float planeVertices[] = {
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+         5.0f, -0.51f, -5.0f,     3.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f
+    };
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 立方体数据 ==========
+    float cubeVertices[] = {
+        -0.5f, -0.5f, -0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,     1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,     0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,     0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,     0.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,     1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,     1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,     0.0f, 0.0f
+    };
+    unsigned int cubeIndices[] = {
+         0,  2,  1,    2,  0,  3,    4,  5,  6,    6,  7,  4,
+         8,  9, 10,   10, 11,  8,   12, 14, 13,   14, 12, 15,
+        16, 17, 18,   18, 19, 16,   20, 22, 21,   22, 20, 23
+    };
+    unsigned int cubeVAO, cubeVBO, cubeEBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glGenBuffers(1, &cubeEBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cubeIndices), cubeIndices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 加载纹理 ==========
+    unsigned int floorTex     = loadTexture("textures/marble.jpg", true);
+    unsigned int containerTex = loadTexture("textures/container.jpg");
+
+    // ========== 10. 纹理单元 ==========
+    shader.use();
+    shader.setInt("texture1", 0);
+    shader.setInt("texture2", 1);
+
+    // ========== 11. 立方体位置 ==========
+    struct { glm::vec3 pos; float rotSpeed; glm::vec3 rotAxis; } cubes[] = {
+        { glm::vec3(-0.8f, 0.01f, -2.5f),  25.0f, glm::vec3(1.0f, 0.3f, 0.5f) },
+        { glm::vec3( 0.8f, 0.01f, -2.5f), -30.0f, glm::vec3(0.2f, 1.0f, 0.4f) },
+    };
+    const int NUM_CUBES = 2;
+
+    // ========== 12. 用户控制参数 ==========
+    bool  cullingEnabled = true;      // 面剔除开关
+    int   cullMode       = 0;        // 0=GL_BACK, 1=GL_FRONT, 2=GL_FRONT_AND_BACK
+    int   frontFace      = 0;        // 0=GL_CCW, 1=GL_CW
+    bool  wireframe      = false;    // 线框模式
+    bool  showFloor      = true;
+
+    const char* cullModeNames[] = {
+        "GL_BACK (剔除背面, 默认)",
+        "GL_FRONT (剔除正面, 看到内部)",
+        "GL_FRONT_AND_BACK (全部剔除)"
+    };
+    const char* frontFaceNames[] = {
+        "GL_CCW (逆时针=正面, 默认)",
+        "GL_CW (顺时针=正面)"
+    };
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos   = glm::vec3(0.0f, 1.5f, 5.0f);
+    float     fov      = 50.0f;
+    float     moveSpeed = 0.08f;
+
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 13. 清屏 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  面剔除（Face Culling）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  F      → 切换面剔除 开/关" << std::endl;
+    std::cout << "  1/2/3  → 切换剔除模式（背面/正面/全部）" << std::endl;
+    std::cout << "  R      → 切换绕序方向 (CCW/CW)" << std::endl;
+    std::cout << "  Q      → 切换线框模式" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 14. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ---- 输入处理 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        static bool fPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
+            if (!fPressed) {
+                cullingEnabled = !cullingEnabled;
+                if (cullingEnabled) glEnable(GL_CULL_FACE);
+                else               glDisable(GL_CULL_FACE);
+                std::cout << (cullingEnabled ? "🗑 面剔除: 启用" : "🗑 面剔除: 禁用") << std::endl;
+                fPressed = true;
+            }
+        } else fPressed = false;
+
+        static bool k1Pressed = false, k2Pressed = false, k3Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !k1Pressed) {
+            k1Pressed = true; cullMode = 0;
+            glCullFace(GL_BACK);
+            std::cout << "🗑 剔除模式: " << cullModeNames[0] << std::endl;
+        } else k1Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !k2Pressed) {
+            k2Pressed = true; cullMode = 1;
+            glCullFace(GL_FRONT);
+            std::cout << "🗑 剔除模式: " << cullModeNames[1] << std::endl;
+        } else k2Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !k3Pressed) {
+            k3Pressed = true; cullMode = 2;
+            glCullFace(GL_FRONT_AND_BACK);
+            std::cout << "🗑 剔除模式: " << cullModeNames[2] << std::endl;
+        } else k3Pressed = false;
+
+        static bool rPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+            if (!rPressed) {
+                frontFace = (frontFace + 1) % 2;
+                glFrontFace(frontFace == 0 ? GL_CCW : GL_CW);
+                std::cout << "🗑 绕序方向: " << frontFaceNames[frontFace] << std::endl;
+                rPressed = true;
+            }
+        } else rPressed = false;
+
+        static bool qPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+            if (!qPressed) {
+                wireframe = !wireframe;
+                if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                else           glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                std::cout << (wireframe ? "📐 线框模式: 启用" : "📐 线框模式: 禁用") << std::endl;
+                qPressed = true;
+            }
+        } else qPressed = false;
+
+        static bool gPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) {
+            if (!gPressed) { showFloor = !showFloor; gPressed = true; }
+        } else gPressed = false;
+
+        // ---- 摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * velocity;
+        // 箭头键始终有效
+        if (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) camPos += right * velocity;
+
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // ---- 清空缓冲 ----
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ---- ImGui 新帧 ----
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // ---- MVP 矩阵 ----
+        glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view       = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ============================================================
+        // 渲染地板
+        // ============================================================
+        if (showFloor) {
+            shader.use();
+            shader.setMat4("projection", projection);
+            shader.setMat4("view", view);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+
+            glm::mat4 planeModel = glm::mat4(1.0f);
+            shader.setMat4("model", planeModel);
+            glBindVertexArray(planeVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        // ============================================================
+        // 渲染旋转立方体
+        // ============================================================
+        //
+        // ★ 选择着色器：正常纹理 vs 线框单色
+        //
+        Shader& activeShader = wireframe ? solidShader : shader;
+        activeShader.use();
+        activeShader.setMat4("projection", projection);
+        activeShader.setMat4("view", view);
+
+        if (!wireframe) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, containerTex);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, containerTex);
+        } else {
+            // 线框模式：纯色（亮绿，容易分辨面朝向）
+            solidShader.setVec3("outlineColor", 0.3f, 1.0f, 0.3f);
+        }
+
+        glBindVertexArray(cubeVAO);
+        for (int i = 0; i < NUM_CUBES; i++) {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubes[i].pos);
+            model = glm::rotate(model, glm::radians(cubes[i].rotSpeed * currentFrame), cubes[i].rotAxis);
+            activeShader.setMat4("model", model);
+            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+        }
+
+        // 恢复填充模式（即使没开线框也是无害的）
+        if (wireframe) {
+            // 已经在上面设置了，但为了安全在 ImGui 渲染前恢复
+            // （ImGui 需要填充模式）
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        }
+
+        // ============================================================
+        // ImGui 面板
+        // ============================================================
+        if (showDebugPanel) {
+            ImGui::Begin("Debug Panel - Face Culling");
+
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 面剔除开关 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Face Culling");
+            if (ImGui::Checkbox("Enable Culling (F)", &cullingEnabled)) {
+                if (cullingEnabled) glEnable(GL_CULL_FACE);
+                else               glDisable(GL_CULL_FACE);
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled(cullingEnabled ? "(ON)" : "(OFF)");
+
+            if (!cullingEnabled) {
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                    "面剔除已禁用 → 所有面都会被绘制（包括背面）");
+            }
+            ImGui::Separator();
+
+            // ---- 剔除模式 ----
+            if (cullingEnabled) {
+                ImGui::Text("Cull Mode:");
+                if (ImGui::BeginCombo("##cullMode", cullModeNames[cullMode])) {
+                    for (int i = 0; i < 3; i++) {
+                        bool sel = (cullMode == i);
+                        if (ImGui::Selectable(cullModeNames[i], sel)) {
+                            cullMode = i;
+                            GLenum modes[] = { GL_BACK, GL_FRONT, GL_FRONT_AND_BACK };
+                            glCullFace(modes[i]);
+                        }
+                        if (sel) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                // 预览效果描述
+                const char* hints[] = {
+                    "效果: 正常 3D 渲染 (看不见背面)",
+                    "效果: 看到立方体内部 (剖面效果)",
+                    "效果: 所有三角形都被剔除 (物体消失!)"
+                };
+                ImGui::TextDisabled("%s", hints[cullMode]);
+            }
+            ImGui::Separator();
+
+            // ---- 绕序 ----
+            ImGui::Text("Front Face (R):");
+            if (ImGui::BeginCombo("##frontFace", frontFaceNames[frontFace])) {
+                for (int i = 0; i < 2; i++) {
+                    bool sel = (frontFace == i);
+                    if (ImGui::Selectable(frontFaceNames[i], sel)) {
+                        frontFace = i;
+                        glFrontFace(i == 0 ? GL_CCW : GL_CW);
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::TextDisabled("CCW 是 OpenGL 默认，大多数模型使用 CCW 绕序");
+            ImGui::Separator();
+
+            // ---- 线框 ----
+            ImGui::Checkbox("Wireframe (W)", &wireframe);
+            if (wireframe) {
+                ImGui::TextDisabled("线框模式: 可以看到所有三角形，\n便于观察哪些面被剔除了");
+            }
+            ImGui::Checkbox("Show Floor (G)", &showFloor);
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled(
+                "F: Toggle culling   |  1/2/3: Mode\n"
+                "Q: Wireframe        |  R: Reverse winding\n"
+                "G: Toggle floor     |  Tab: Panel\n"
+                "WASD/Arrows: Move   |  RClick+Drag: Look");
+
+            ImGui::End();
+        }
+
+        // ImGui 渲染前恢复填充模式（线框在立方体绘制后已恢复）
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 15. 清理 ==========
+    // 恢复默认状态
+    glDisable(GL_CULL_FACE);
+    glFrontFace(GL_CCW);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &cubeEBO);
+    glDeleteTextures(1, &floorTex);
+    glDeleteTextures(1, &containerTex);
+    glfwTerminate();
+    return 0;
+}
+
+
+// ================================================================
 // 主函数 — 章节选择器
 // ================================================================
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 混合（Blending）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 面剔除（Face Culling）" << std::endl;
+    return runFaceCullingDemo();
     return runBlendingDemo();
     return runStencilTestingDemo();
     return runDepthTestingDemo();
