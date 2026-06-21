@@ -9,10 +9,12 @@
 // 头文件
 // ================================================================
 
+#define _CRT_SECURE_NO_WARNINGS  // fopen (用于加载中文字体)
 #include <glad/glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <cstdio>
 #include <iostream>
 
 // GLM 数学库（仅头文件，无需链接）
@@ -116,6 +118,59 @@ bool initGLAD()
         return false;
     }
     return true;
+}
+
+/**
+ * 初始化 ImGui（含中文字体支持）
+ *
+ * ★ 关键：默认 ImGui 字体只有 ASCII 字符，中文会乱码。
+ *    这里加载系统自带的中文字体（微软雅黑 → 黑体回退）。
+ *
+ * @param window     GLFW 窗口指针
+ * @param fontSize   字体大小（默认 18px，适配 1080p 屏幕）
+ */
+void initImGuiWithChinese(GLFWwindow* window, float fontSize = 18.0f)
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // ---- 加载中文字体 ----
+    //
+    // 优先使用微软雅黑 (msyh.ttc)，不存在则回退到黑体 (simhei.ttf)
+    // 两个都是 Windows 预装中文字体，覆盖常见简繁中文
+    //
+    const char* fontPath = "C:/Windows/Fonts/msyh.ttc";
+    bool fontLoaded = false;
+
+    // 检查字体文件是否存在
+    if (FILE* f = fopen(fontPath, "rb")) {
+        fclose(f);
+        io.Fonts->AddFontFromFileTTF(fontPath, fontSize, NULL,
+            io.Fonts->GetGlyphRangesChineseFull());
+        fontLoaded = true;
+    }
+
+    if (!fontLoaded) {
+        fontPath = "C:/Windows/Fonts/simhei.ttf";
+        if (FILE* f = fopen(fontPath, "rb")) {
+            fclose(f);
+            io.Fonts->AddFontFromFileTTF(fontPath, fontSize, NULL,
+                io.Fonts->GetGlyphRangesChineseFull());
+            fontLoaded = true;
+        }
+    }
+
+    if (!fontLoaded) {
+        // 完全回退：使用默认字体（不包含中文，但不崩溃）
+        std::cout << "⚠ 未找到中文字体，GUI 中文将显示乱码" << std::endl;
+        io.Fonts->AddFontDefault();
+    }
+
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
 }
 
 
@@ -302,13 +357,7 @@ int runCoordinatesDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 4. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 5. 编译着色器 ==========
     Shader shader("shaders/coordinates/coordinate_system.vert", "shaders/textures/texture_combined.frag", true);
@@ -655,13 +704,7 @@ int runCameraDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     // 复用坐标系统章节的着色器（已包含 MVP 矩阵 uniform）
@@ -1039,13 +1082,7 @@ int runColorsDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 4. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 5. 编译着色器 ==========
     //
@@ -1425,13 +1462,7 @@ int runBasicLightingDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 4. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 5. 编译着色器 ==========
     //
@@ -1913,13 +1944,7 @@ int runMaterialsDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 4. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 5. 编译着色器 ==========
     //
@@ -2313,13 +2338,7 @@ int runLightingMapsDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 3. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 4. 编译着色器 ==========
     Shader lightingShader("shaders/lighting/basic_lighting.vert",
@@ -2689,13 +2708,7 @@ int runLightCastersDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 3. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 4. 编译着色器 ==========
     Shader lightingShader("shaders/lighting/basic_lighting.vert",
@@ -3138,13 +3151,7 @@ int runMultipleLightsDemo()
     glEnable(GL_DEPTH_TEST);
 
     // ========== 3. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 4. 编译着色器 ==========
     Shader lightingShader("shaders/lighting/basic_lighting.vert",
@@ -3585,13 +3592,7 @@ int runModelLoadingDemo()
     Model backpack("models/backpack/backpack.obj");
 
     // ========== 5. ImGui 初始化 ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.FontGlobalScale = 1.8f;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window, 28.0f);  // 模型查看器用稍大字号
 
     // ========== 6. 状态变量 ==========
     // ---- 摄像机 ----
@@ -3982,13 +3983,7 @@ int runDepthTestingDemo()
     });
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     //
@@ -4628,13 +4623,7 @@ int runStencilTestingDemo()
     });
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     //
@@ -4885,7 +4874,7 @@ int runStencilTestingDemo()
 
         // ---- 鼠标滚轮：调整描边宽度 ----
         // ★ 通过 ImGui IO 来检测滚轮（ImGui 会捕获滚轮事件）
-        float mouseWheel = io.MouseWheel;
+        float mouseWheel = ImGui::GetIO().MouseWheel;
         if (mouseWheel != 0.0f)
         {
             outlineScale += mouseWheel * 0.01f;
@@ -5298,13 +5287,7 @@ int runBlendingDemo()
     });
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     //
@@ -5626,7 +5609,7 @@ int runBlendingDemo()
 
         // ---- 鼠标滚轮：调整草地缩放 ----
         static float grassScale = 1.0f;
-        float mouseWheel = io.MouseWheel;
+        float mouseWheel = ImGui::GetIO().MouseWheel;
         if (mouseWheel != 0.0f)
         {
             grassScale += mouseWheel * 0.1f;
@@ -6076,13 +6059,7 @@ int runFaceCullingDemo()
     });
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     Shader shader("shaders/coordinates/coordinate_system.vert",
@@ -6561,13 +6538,7 @@ int runFramebuffersDemo()
     });
 
     // ========== 5. 初始化 ImGui ==========
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    initImGuiWithChinese(window);
 
     // ========== 6. 编译着色器 ==========
     //
