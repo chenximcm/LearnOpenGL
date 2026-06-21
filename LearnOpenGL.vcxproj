@@ -184,9 +184,61 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="shaders\textures\texture_combined.frag" />
     <None Include="shaders\transformations\transform.vert" />
     <None Include="shaders\coordinates\coordinate_system.vert" />
+    <None Include="shaders\lighting\colors.frag" />
+    <None Include="shaders\lighting\light_cube.vert" />
+    <None Include="shaders\lighting\light_cube.frag" />
+    <None Include="shaders\lighting\basic_lighting.vert" />
+    <None Include="shaders\lighting\basic_lighting.frag" />
+    <None Include="shaders\lighting\materials.frag" />
+    <None Include="shaders\lighting\lighting_maps.frag" />
+    <None Include="shaders\lighting\light_casters.frag" />
+    <None Include="shaders\lighting\multiple_lights.frag" />
     <None Include="shaders\model\model.vert" />
     <None Include="shaders\model\model.frag" />
     <None Include="shaders\depth_testing\depth_visualize.frag" />
+    <None Include="shaders\stencil_testing\stencil_outline.frag" />
+    <None Include="shaders\stencil_testing\stencil_single_color.vert" />
+    <None Include="shaders\blending\blend_discard.frag" />
+    <None Include="shaders\blending\blend_alpha.vert" />
+    <None Include="shaders\blending\blend_transparent.frag" />
+    <None Include="shaders\framebuffers\screen.vert" />
+    <None Include="shaders\framebuffers\screen.frag" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="notes\01-创建窗口-知识点.md" />
+    <None Include="notes\02-Hello-Triangle-知识点.md" />
+    <None Include="notes\03-EBO与Shader封装-知识点.md" />
+    <None Include="notes\04-纹理-知识点.md" />
+    <None Include="notes\05-变换-知识点.md" />
+    <None Include="notes\06-ImGui-知识点.md" />
+    <None Include="notes\07-坐标系统-知识点.md" />
+    <None Include="notes\08-摄像机-知识点.md" />
+    <None Include="notes\09-颜色-知识点.md" />
+    <None Include="notes\10-基础光照-知识点.md" />
+    <None Include="notes\11-材质-知识点.md" />
+    <None Include="notes\12-光照贴图-知识点.md" />
+    <None Include="notes\13-投光物-知识点.md" />
+    <None Include="notes\14-多光源-知识点.md" />
+    <None Include="notes\15-模型加载-Assimp-知识点.md" />
+    <None Include="notes\16-深度测试-知识点.md" />
+    <None Include="notes\17-模板测试-知识点.md" />
+    <None Include="notes\18-混合-知识点.md" />
+    <None Include="notes\19-面剔除-知识点.md" />
+    <None Include="notes\20-帧缓冲-知识点.md" />
+    <None Include="notes\A1-渲染管线深度解析-附加.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="textures\awesomeface.png" />
+    <None Include="textures\container.jpg" />
+    <None Include="textures\container2.png" />
+    <None Include="textures\container2_specular.png" />
+    <None Include="textures\floor.jpg" />
+    <None Include="textures\grass.png" />
+    <None Include="textures\marble.jpg" />
+    <None Include="textures\window.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll" />

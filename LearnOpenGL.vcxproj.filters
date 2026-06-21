@@ -13,7 +13,8 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <!-- ===== src 模块文件夹（嵌套在 源文件 下） ===== -->
+
+    <!-- src 模块文件夹 -->
     <Filter Include="源文件\common">
       <UniqueIdentifier>{f6a7b8c9-d0e1-2345-fabc-456789012345}</UniqueIdentifier>
     </Filter>
@@ -23,24 +24,50 @@
     <Filter Include="源文件\imgui\backends">
       <UniqueIdentifier>{b2c3d4e5-f6a7-8901-imgu-f12345678901}</UniqueIdentifier>
     </Filter>
-    <!-- ===== shaders 模块文件夹（嵌套在 资源文件 下） ===== -->
-    <Filter Include="资源文件\triangle">
+
+    <!-- shaders 目录树（挂在 资源文件 下） -->
+    <Filter Include="资源文件\shaders">
+      <UniqueIdentifier>{c0d1e2f3-a4b5-6789-shad-000000000000}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\shaders\triangle">
       <UniqueIdentifier>{b8c9d0e1-f2a3-4567-bcde-678901234567}</UniqueIdentifier>
     </Filter>
-    <Filter Include="资源文件\textures">
+    <Filter Include="资源文件\shaders\textures">
       <UniqueIdentifier>{c9d0e1f2-a3b4-5678-cdef-789012345678}</UniqueIdentifier>
     </Filter>
-    <Filter Include="资源文件\transformations">
+    <Filter Include="资源文件\shaders\transformations">
       <UniqueIdentifier>{d0e1f2a3-b4c5-6789-defa-890123456789}</UniqueIdentifier>
     </Filter>
-    <Filter Include="资源文件\coordinates">
+    <Filter Include="资源文件\shaders\coordinates">
       <UniqueIdentifier>{e1f2a3b4-c5d6-7890-efab-901234567890}</UniqueIdentifier>
     </Filter>
-    <Filter Include="资源文件\model">
+    <Filter Include="资源文件\shaders\lighting">
+      <UniqueIdentifier>{11111111-1111-1111-light-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\shaders\model">
       <UniqueIdentifier>{f2a3b4c5-6d7e-8f90-abcd-0123456789ab}</UniqueIdentifier>
     </Filter>
-    <Filter Include="资源文件\depth_testing">
+    <Filter Include="资源文件\shaders\depth_testing">
       <UniqueIdentifier>{a3b4c5d6-7e8f-9012-abcd-123456789abc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\shaders\stencil_testing">
+      <UniqueIdentifier>{22222222-2222-2222-stenc-222222222222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\shaders\blending">
+      <UniqueIdentifier>{33333333-3333-3333-blend-333333333333}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="资源文件\shaders\framebuffers">
+      <UniqueIdentifier>{44444444-4444-4444-frame-444444444444}</UniqueIdentifier>
+    </Filter>
+
+    <!-- notes 目录树 -->
+    <Filter Include="资源文件\notes">
+      <UniqueIdentifier>{55555555-5555-5555-notes-555555555555}</UniqueIdentifier>
+    </Filter>
+
+    <!-- textures 目录树 -->
+    <Filter Include="资源文件\textures">
+      <UniqueIdentifier>{66666666-6666-6666-tex-6666666666666}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 
@@ -52,7 +79,6 @@
     <ClCompile Include="src\common\stb_image.cpp">
       <Filter>源文件\common</Filter>
     </ClCompile>
-    <!-- vendor -->
     <ClCompile Include="vendor\include\GLAD\glad.c">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -92,41 +118,191 @@
     </ClInclude>
   </ItemGroup>
 
-  <!-- ======================== None (shaders) ======================== -->
+  <!-- ======================== None: shaders ======================== -->
   <ItemGroup>
     <None Include="shaders\triangle\triangle.vert">
-      <Filter>资源文件\triangle</Filter>
+      <Filter>资源文件\shaders\triangle</Filter>
     </None>
     <None Include="shaders\triangle\triangle.frag">
-      <Filter>资源文件\triangle</Filter>
+      <Filter>资源文件\shaders\triangle</Filter>
     </None>
     <None Include="shaders\textures\texture.vert">
-      <Filter>资源文件\textures</Filter>
+      <Filter>资源文件\shaders\textures</Filter>
     </None>
     <None Include="shaders\textures\texture.frag">
-      <Filter>资源文件\textures</Filter>
+      <Filter>资源文件\shaders\textures</Filter>
     </None>
     <None Include="shaders\textures\texture_combined.frag">
-      <Filter>资源文件\textures</Filter>
+      <Filter>资源文件\shaders\textures</Filter>
     </None>
     <None Include="shaders\transformations\transform.vert">
-      <Filter>资源文件\transformations</Filter>
+      <Filter>资源文件\shaders\transformations</Filter>
     </None>
     <None Include="shaders\coordinates\coordinate_system.vert">
-      <Filter>资源文件\coordinates</Filter>
+      <Filter>资源文件\shaders\coordinates</Filter>
+    </None>
+    <None Include="shaders\lighting\colors.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\light_cube.vert">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\light_cube.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\basic_lighting.vert">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\basic_lighting.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\materials.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\lighting_maps.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\light_casters.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
+    </None>
+    <None Include="shaders\lighting\multiple_lights.frag">
+      <Filter>资源文件\shaders\lighting</Filter>
     </None>
     <None Include="shaders\model\model.vert">
-      <Filter>资源文件\model</Filter>
+      <Filter>资源文件\shaders\model</Filter>
     </None>
     <None Include="shaders\model\model.frag">
-      <Filter>资源文件\model</Filter>
+      <Filter>资源文件\shaders\model</Filter>
     </None>
     <None Include="shaders\depth_testing\depth_visualize.frag">
-      <Filter>资源文件\depth_testing</Filter>
+      <Filter>资源文件\shaders\depth_testing</Filter>
+    </None>
+    <None Include="shaders\stencil_testing\stencil_outline.frag">
+      <Filter>资源文件\shaders\stencil_testing</Filter>
+    </None>
+    <None Include="shaders\stencil_testing\stencil_single_color.vert">
+      <Filter>资源文件\shaders\stencil_testing</Filter>
+    </None>
+    <None Include="shaders\blending\blend_discard.frag">
+      <Filter>资源文件\shaders\blending</Filter>
+    </None>
+    <None Include="shaders\blending\blend_alpha.vert">
+      <Filter>资源文件\shaders\blending</Filter>
+    </None>
+    <None Include="shaders\blending\blend_transparent.frag">
+      <Filter>资源文件\shaders\blending</Filter>
+    </None>
+    <None Include="shaders\framebuffers\screen.vert">
+      <Filter>资源文件\shaders\framebuffers</Filter>
+    </None>
+    <None Include="shaders\framebuffers\screen.frag">
+      <Filter>资源文件\shaders\framebuffers</Filter>
     </None>
   </ItemGroup>
 
-  <!-- ======================== dll ======================== -->
+  <!-- ======================== None: notes ======================== -->
+  <ItemGroup>
+    <None Include="notes\01-创建窗口-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\02-Hello-Triangle-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\03-EBO与Shader封装-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\04-纹理-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\05-变换-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\06-ImGui-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\07-坐标系统-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\08-摄像机-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\09-颜色-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\10-基础光照-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\11-材质-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\12-光照贴图-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\13-投光物-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\14-多光源-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\15-模型加载-Assimp-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\16-深度测试-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\17-模板测试-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\18-混合-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\19-面剔除-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\20-帧缓冲-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\A1-渲染管线深度解析-附加.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+  </ItemGroup>
+
+  <!-- ======================== None: textures ======================== -->
+  <ItemGroup>
+    <None Include="textures\awesomeface.png">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\container.jpg">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\container2.png">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\container2_specular.png">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\floor.jpg">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\grass.png">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\marble.jpg">
+      <Filter>资源文件\textures</Filter>
+    </None>
+    <None Include="textures\window.png">
+      <Filter>资源文件\textures</Filter>
+    </None>
+  </ItemGroup>
+
+  <!-- ======================== None: README ======================== -->
+  <ItemGroup>
+    <None Include="README.md">
+      <Filter>资源文件</Filter>
+    </None>
+  </ItemGroup>
+
+  <!-- ======================== None: vendor DLL ======================== -->
   <ItemGroup>
     <None Include="vendor\GLFW\glfw3.dll">
       <Filter>资源文件</Filter>
