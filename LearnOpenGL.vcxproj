@@ -203,6 +203,11 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="shaders\blending\blend_transparent.frag" />
     <None Include="shaders\framebuffers\screen.vert" />
     <None Include="shaders\framebuffers\screen.frag" />
+    <None Include="shaders\cubemaps\skybox.vert" />
+    <None Include="shaders\cubemaps\skybox.frag" />
+    <None Include="shaders\cubemaps\env_map.vert" />
+    <None Include="shaders\cubemaps\env_reflection.frag" />
+    <None Include="shaders\cubemaps\env_refraction.frag" />
   </ItemGroup>
   <ItemGroup>
     <None Include="notes\01-创建窗口-知识点.md" />
@@ -225,6 +230,7 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="notes\18-混合-知识点.md" />
     <None Include="notes\19-面剔除-知识点.md" />
     <None Include="notes\20-帧缓冲-知识点.md" />
+    <None Include="notes\21-立方体贴图-知识点.md" />
     <None Include="notes\A1-渲染管线深度解析-附加.md" />
   </ItemGroup>
   <ItemGroup>

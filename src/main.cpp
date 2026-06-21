@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：帧缓冲（Framebuffers）
+ *  当前学习章节：立方体贴图（Cubemaps）
  * ============================================================
  */
 
@@ -6474,6 +6474,909 @@ int runFaceCullingDemo()
 
 
 // ╔══════════════════════════════════════════════════════════════╗
+// ║            立方体贴图（Cubemaps）Demo                         ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+/**
+ * 从现有纹理文件创建立方体贴图
+ *
+ * 将同一张 2D 纹理应用到 cubemap 的六个面。
+ * ★ 这不是"正确"的 cubemap（六面应该各自不同），但比纯色更有质感。
+ *    天空盒和环境映射都使用该 cubemap。
+ *
+ * 加载失败时回退到程序化纯色。
+ *
+ * @param path       纹理路径（如 "textures/marble.jpg"）
+ * @param fallbackSize  回退纯色的分辨率
+ * @return  cubemap 纹理 ID
+ */
+unsigned int createCubemapFromTexture(const char* path, int fallbackSize = 128)
+{
+    unsigned int texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, texID);
+
+    GLenum targets[6] = {
+        GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+    };
+    const char* faceNames[6] = { "Right(+X)", "Left(-X)", "Top(+Y)", "Bottom(-Y)", "Front(+Z)", "Back(-Z)" };
+
+    // ---- 尝试加载纹理文件 ----
+    int w, h, nrCh;
+    stbi_set_flip_vertically_on_load(false);  // cubemap 不需要翻转
+    unsigned char* imgData = stbi_load(path, &w, &h, &nrCh, 0);
+
+    if (imgData)
+    {
+        GLenum fmt = (nrCh == 4) ? GL_RGBA : GL_RGB;
+        std::cout << "✓ 从纹理文件创建 Cubemap: " << path
+                  << " (" << w << "×" << h << ", " << nrCh << " 通道)" << std::endl;
+
+        for (int face = 0; face < 6; face++) {
+            glTexImage2D(targets[face], 0, fmt, w, h, 0, fmt, GL_UNSIGNED_BYTE, imgData);
+            std::cout << "  ✓ Cubemap " << faceNames[face] << std::endl;
+        }
+        stbi_image_free(imgData);
+    }
+    else
+    {
+        // ---- 回退：程序化纯色 ----
+        std::cout << "⚠ 无法加载 " << path << "，回退到程序化纯色" << std::endl;
+
+        glm::vec3 faceColors[6] = {
+            glm::vec3(0.8f, 0.2f, 0.2f),  // +X Right  红
+            glm::vec3(0.2f, 0.6f, 0.2f),  // -X Left   绿
+            glm::vec3(0.3f, 0.5f, 0.9f),  // +Y Top    蓝
+            glm::vec3(0.8f, 0.8f, 0.3f),  // -Y Bottom 黄
+            glm::vec3(0.2f, 0.7f, 0.7f),  // +Z Front  青
+            glm::vec3(0.7f, 0.3f, 0.7f),  // -Z Back   紫
+        };
+
+        int size = fallbackSize;
+        unsigned char* data = new unsigned char[size * size * 3];
+
+        for (int face = 0; face < 6; face++) {
+            glm::vec3 base = faceColors[face];
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    int idx = (y * size + x) * 3;
+                    float fx = (float)x / size, fy = (float)y / size;
+                    float dcx = (fx - 0.5f) * 2.0f, dcy = (fy - 0.5f) * 2.0f;
+                    float dist = sqrtf(dcx * dcx + dcy * dcy);
+                    float brightness = glm::clamp(1.0f - dist * 0.5f, 0.3f, 1.0f);
+                    bool crossX = fabsf(dcx) < 0.04f || fabsf(dcy) < 0.04f;
+                    float cross = crossX ? 0.6f : 1.0f;
+                    data[idx + 0] = (unsigned char)(base.r * brightness * cross * 255);
+                    data[idx + 1] = (unsigned char)(base.g * brightness * cross * 255);
+                    data[idx + 2] = (unsigned char)(base.b * brightness * cross * 255);
+                }
+            }
+            glTexImage2D(targets[face], 0, GL_RGB, size, size, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+            std::cout << "  ✓ Cubemap " << faceNames[face] << " (procedural " << size << "×" << size << ")" << std::endl;
+        }
+        delete[] data;
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    return texID;
+}
+
+/**
+ * 程序化生成日落湖景立方体贴图
+ *
+ * 模拟：深空 → 日落天空 → 远山 → 湖面 → 近岸的层次感
+ * 每个面 256×256，分不同方位有不同色调。
+ */
+unsigned int createProceduralSkybox(int size = 256)
+{
+    unsigned int texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, texID);
+
+    GLenum targets[6] = {
+        GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+    };
+    const char* faceNames[6] = { "Right(+X)", "Left(-X)", "Top(+Y)", "Bottom(-Y)", "Front(+Z)", "Back(-Z)" };
+
+    unsigned char* data = new unsigned char[size * size * 3];
+
+    // 太阳方向（日落位置，水平偏下）
+    glm::vec3 sunDir = glm::normalize(glm::vec3(0.6f, -0.05f, 0.3f));
+
+    for (int face = 0; face < 6; face++)
+    {
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int idx = (y * size + x) * 3;
+
+                float u = (float)x / size * 2.0f - 1.0f;
+                float v = (float)y / size * 2.0f - 1.0f;
+
+                glm::vec3 dir;
+                switch (face) {
+                    case 0: dir = glm::vec3( 1, -v, -u); break;
+                    case 1: dir = glm::vec3(-1, -v,  u); break;
+                    case 2: dir = glm::vec3( u,  1,  v); break;
+                    case 3: dir = glm::vec3( u, -1, -v); break;
+                    case 4: dir = glm::vec3( u, -v,  1); break;
+                    case 5: dir = glm::vec3(-u, -v, -1); break;
+                }
+                dir = glm::normalize(dir);
+
+                float skyY = dir.y;
+                float sunDot = glm::clamp(glm::dot(dir, sunDir), 0.0f, 1.0f);
+
+                // ==== 色彩定义 ====
+                glm::vec3 spaceColor  = glm::vec3(0.05f, 0.02f, 0.15f);  // 深紫黑（天顶）
+                glm::vec3 skyHigh     = glm::vec3(0.15f, 0.22f, 0.55f);  // 深蓝高空
+                glm::vec3 skyMid      = glm::vec3(0.55f, 0.40f, 0.45f);  // 紫粉 中空
+                glm::vec3 skyLow      = glm::vec3(0.90f, 0.55f, 0.30f);  // 橙黄 近地平线
+                glm::vec3 sunColor    = glm::vec3(1.00f, 0.85f, 0.50f);  // 太阳暖光
+                glm::vec3 sunGlow     = glm::vec3(1.00f, 0.65f, 0.20f);  // 太阳光晕
+                glm::vec3 horizonHaze = glm::vec3(0.95f, 0.70f, 0.55f);  // 地平线雾
+                glm::vec3 waterDeep   = glm::vec3(0.08f, 0.15f, 0.30f);  // 深水
+                glm::vec3 waterMid    = glm::vec3(0.15f, 0.25f, 0.45f);  // 中水
+                glm::vec3 waterShallow= glm::vec3(0.25f, 0.40f, 0.55f);  // 浅水
+                glm::vec3 beachColor  = glm::vec3(0.60f, 0.50f, 0.30f);  // 沙滩
+
+                glm::vec3 color;
+
+                if (skyY > 0.0f) {
+                    // === 天空 ===
+                    float t = skyY;
+
+                    // 四段混合：深空→高空→中空→低空（日落）
+                    float t_space = glm::smoothstep(0.30f, 0.60f, t);
+                    float t_high  = glm::smoothstep(0.10f, 0.30f, t);
+                    float t_mid   = glm::smoothstep(0.02f, 0.12f, t);
+
+                    glm::vec3 baseColor = spaceColor;
+                    baseColor = glm::mix(baseColor, skyHigh, t_space);
+                    baseColor = glm::mix(baseColor, skyMid,  t_high);
+                    baseColor = glm::mix(baseColor, skyLow,  t_mid);
+
+                    // 太阳光晕
+                    float glow = powf(sunDot, 80.0f) * 0.8f;
+                    float midGlow = powf(sunDot, 8.0f) * 0.15f;
+                    float wideGlow = powf(sunDot, 2.0f) * 0.05f;
+                    baseColor += sunGlow * glow;
+                    baseColor += sunColor * midGlow;
+                    baseColor += sunColor * wideGlow;
+
+                    // 地平线雾
+                    float haze = 1.0f - glm::smoothstep(0.0f, 0.08f, t);
+                    baseColor = glm::mix(baseColor, horizonHaze, haze * 0.5f);
+
+                    // 星星（天顶附近）
+                    float starField = 0.0f;
+                    if (t > 0.5f) {
+                        float sx = dir.x * 37.0f;
+                        float sy = dir.z * 29.0f;
+                        float noise = sin(sx) * cos(sy) * sin(dir.y * 41.0f);
+                        noise = noise * 0.5f + 0.5f;
+                        starField = glm::smoothstep(0.92f, 0.98f, noise);
+                        starField *= glm::smoothstep(0.5f, 0.9f, t);
+                    }
+                    baseColor += glm::vec3(0.7f) * starField;
+
+                    color = baseColor;
+
+                } else if (skyY > -0.15f) {
+                    // === 地平线 / 水面反射区 ===
+                    float t = (skyY + 0.15f) / 0.15f;
+
+                    // 天空在水平面上的颜色（镜像反射）
+                    float reflectY = -skyY;
+                    float r_space = glm::smoothstep(0.30f, 0.60f, reflectY);
+                    float r_high  = glm::smoothstep(0.10f, 0.30f, reflectY);
+                    float r_mid   = glm::smoothstep(0.02f, 0.12f, reflectY);
+                    glm::vec3 reflectColor = spaceColor;
+                    reflectColor = glm::mix(reflectColor, skyHigh, r_space);
+                    reflectColor = glm::mix(reflectColor, skyMid,  r_high);
+                    reflectColor = glm::mix(reflectColor, skyLow,  r_mid);
+
+                    // 水面反射太阳光
+                    reflectColor += sunColor * powf(sunDot, 6.0f) * 0.3f;
+
+                    // 远处水面比天空暗
+                    reflectColor *= 0.55f;
+
+                    // 与雾气混合
+                    color = glm::mix(horizonHaze * 0.7f, reflectColor, t);
+                    color = glm::mix(color, waterMid, 0.2f);
+
+                } else {
+                    // === 水面 / 湖底 ===
+                    float depth = -skyY;
+
+                    // 湖面颜色：深→浅
+                    glm::vec3 waterColor = glm::mix(waterMid, waterDeep, glm::smoothstep(0.15f, 0.7f, depth));
+
+                    // 远处水面反射天空颜色
+                    float shoreDist = 1.0f - glm::smoothstep(0.15f, 0.5f, depth);
+                    waterColor = glm::mix(waterColor, waterShallow, shoreDist);
+
+                    // 近岸沙滩
+                    float beach = glm::smoothstep(0.7f, 0.95f, depth);
+                    waterColor = glm::mix(waterColor, beachColor, beach);
+
+                    // 水面波纹
+                    float ripple = sin(dir.x * 40.0f + dir.z * 25.0f) * cos(dir.z * 35.0f + dir.x * 30.0f);
+                    ripple = ripple * 0.5f + 0.5f;
+                    ripple *= shoreDist * 0.15f;
+                    waterColor += glm::vec3(0.1f, 0.15f, 0.2f) * ripple;
+
+                    color = waterColor;
+                }
+
+                data[idx + 0] = (unsigned char)(glm::clamp(color.r, 0.0f, 1.0f) * 255);
+                data[idx + 1] = (unsigned char)(glm::clamp(color.g, 0.0f, 1.0f) * 255);
+                data[idx + 2] = (unsigned char)(glm::clamp(color.b, 0.0f, 1.0f) * 255);
+            }
+        }
+        glTexImage2D(targets[face], 0, GL_RGB, size, size, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+        std::cout << "  ✓ " << faceNames[face] << " (procedural, " << size << "×" << size << ")" << std::endl;
+    }
+
+    delete[] data;
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    std::cout << "✓ 程序化日落湖景 Cubemap 创建成功" << std::endl;
+
+    return texID;
+}
+
+/**
+ * 从 6 张独立纹理文件创建逼真天空盒立方体贴图
+ *
+ * 先尝试加载文件，失败则自动回退到程序化天空。
+ *
+ * @param dirPath  目录路径（如 "textures/skybox/"）
+ * @return  cubemap 纹理 ID
+ */
+unsigned int createCubemapFromSkybox(const char* dirPath)
+{
+    const char* faceFiles[6] = {
+        "right.jpg", "left.jpg",
+        "top.jpg",   "bottom.jpg",
+        "front.jpg", "back.jpg",
+    };
+    GLenum targets[6] = {
+        GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
+        GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+    };
+    const char* faceNames[6] = { "Right(+X)", "Left(-X)", "Top(+Y)", "Bottom(-Y)", "Front(+Z)", "Back(-Z)" };
+
+    // 先检查第一个文件是否存在
+    char testPath[256];
+    snprintf(testPath, sizeof(testPath), "%sright.jpg", dirPath);
+    FILE* test = fopen(testPath, "rb");
+    if (!test) {
+        std::cout << "⚠ 未找到天空盒纹理文件，使用程序化天空" << std::endl;
+        return createProceduralSkybox();
+    }
+    fclose(test);
+
+    unsigned int texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, texID);
+
+    stbi_set_flip_vertically_on_load(false);
+
+    for (int i = 0; i < 6; i++)
+    {
+        char fullPath[256];
+        snprintf(fullPath, sizeof(fullPath), "%s%s", dirPath, faceFiles[i]);
+
+        int w, h, nrCh;
+        unsigned char* data = stbi_load(fullPath, &w, &h, &nrCh, 0);
+        if (data)
+        {
+            GLenum fmt = (nrCh == 4) ? GL_RGBA : (nrCh == 3) ? GL_RGB : GL_RED;
+            glTexImage2D(targets[i], 0, fmt, w, h, 0, fmt, GL_UNSIGNED_BYTE, data);
+            std::cout << "  ✓ " << faceNames[i] << " → " << faceFiles[i]
+                      << " (" << w << "×" << h << ")" << std::endl;
+            stbi_image_free(data);
+        }
+        else
+        {
+            std::cerr << "  ✗ 加载失败: " << fullPath << " → 回退到程序化天空" << std::endl;
+            glDeleteTextures(1, &texID);
+            return createProceduralSkybox();
+        }
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    std::cout << "✓ 天空盒 Cubemap 创建成功（从文件）" << std::endl;
+
+    return texID;
+}
+
+
+int runCubemapsDemo()
+{
+    const unsigned int SCR_WIDTH  = 1000;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Cubemaps | 1:Skybox 2:Reflect 3:Refract Tab:Panel",
+        NULL, NULL);
+    if (window == NULL) { std::cout << "⨯ Failed to create GLFW window" << std::endl; glfwTerminate(); return -1; }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    { std::cout << "⨯ Failed to initialize GLAD" << std::endl; return -1; }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. 基础 OpenGL 设置 ==========
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+
+    // ========== 4. 鼠标回调 ==========
+    static float camYaw   = -90.0f, camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 500.0, lastMY = 350.0;
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) { firstMouse = true; return; }
+        if (firstMouse) { lastMX = xpos; lastMY = ypos; firstMouse = false; }
+        double dx = xpos - lastMX, dy = lastMY - ypos;
+        lastMX = xpos; lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    initImGuiWithChinese(window, 20.0f);
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // 天空盒着色器
+    Shader skyboxShader("shaders/cubemaps/skybox.vert",
+                        "shaders/cubemaps/skybox.frag", true);
+
+    // 环境映射着色器（反射 & 折射共用顶点着色器）
+    Shader reflectionShader("shaders/cubemaps/env_map.vert",
+                            "shaders/cubemaps/env_reflection.frag", true);
+
+    Shader refractionShader("shaders/cubemaps/env_map.vert",
+                            "shaders/cubemaps/env_refraction.frag", true);
+
+    // 基础场景着色器（地板）
+    Shader sceneShader("shaders/coordinates/coordinate_system.vert",
+                       "shaders/textures/texture_combined.frag", true);
+
+    // ========== 7. 天空盒顶点数据 ==========
+    //
+    // 1×1×1 立方体，36 个顶点（每个面单独定义，保证法线正确）
+    // 天空盒不需要法线，只需要位置
+    //
+    float skyboxVertices[] = {
+        -1.0f,  1.0f, -1.0f,    -1.0f, -1.0f, -1.0f,     1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,     1.0f,  1.0f, -1.0f,    -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,    -1.0f, -1.0f, -1.0f,    -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,    -1.0f,  1.0f,  1.0f,    -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f, -1.0f,     1.0f, -1.0f,  1.0f,     1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,     1.0f,  1.0f, -1.0f,     1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,    -1.0f,  1.0f,  1.0f,     1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,     1.0f, -1.0f,  1.0f,    -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,     1.0f,  1.0f, -1.0f,     1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,    -1.0f,  1.0f,  1.0f,    -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,    -1.0f, -1.0f,  1.0f,     1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,    -1.0f, -1.0f,  1.0f,     1.0f, -1.0f,  1.0f
+    };
+    unsigned int skyboxVAO, skyboxVBO;
+    glGenVertexArrays(1, &skyboxVAO);
+    glGenBuffers(1, &skyboxVBO);
+    glBindVertexArray(skyboxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, skyboxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), skyboxVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 8. 环境映射立方体（含法线） ==========
+    //
+    // 每个面 6 个顶点（2 三角形），每顶点：位置(vec3) + 法线(vec3) = 6 float
+    //
+    float cubeWithNormals[] = {
+        // 后面 (Z-), 法线 (0, 0, -1)
+        -0.5f, -0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,   0.0f,  0.0f, -1.0f,
+        // 前面 (Z+), 法线 (0, 0, 1)
+        -0.5f, -0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+         0.5f, -0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+        -0.5f,  0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+        -0.5f, -0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+         0.5f,  0.5f,  0.5f,   0.0f,  0.0f,  1.0f,
+        // 左面 (X-), 法线 (-1, 0, 0) — 修正为 CCW 绕序
+        -0.5f,  0.5f, -0.5f,  -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f,  -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,  -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,  -1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f,  -1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,  -1.0f,  0.0f,  0.0f,
+        // 右面 (X+), 法线 (1, 0, 0)
+         0.5f,  0.5f,  0.5f,   1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,   1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,   1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,   1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,   1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,   1.0f,  0.0f,  0.0f,
+        // 底面 (Y-), 法线 (0, -1, 0) — 修正为 CCW 绕序
+         0.5f, -0.5f, -0.5f,   0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f,   0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,   0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f,   0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,   0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,   0.0f, -1.0f,  0.0f,
+        // 顶面 (Y+), 法线 (0, 1, 0)
+        -0.5f,  0.5f, -0.5f,   0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,   0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,   0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f,   0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f,   0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,   0.0f,  1.0f,  0.0f,
+    };
+    unsigned int cubeVAO, cubeVBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeWithNormals), cubeWithNormals, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 9. 地板平面 ==========
+    float planeVertices[] = {
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+         5.0f, -0.51f, -5.0f,     3.0f, 3.0f,
+         5.0f, -0.51f,  5.0f,     3.0f, 0.0f,
+        -5.0f, -0.51f, -5.0f,     0.0f, 3.0f,
+        -5.0f, -0.51f,  5.0f,     0.0f, 0.0f
+    };
+    unsigned int planeVAO, planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    // ========== 10. 纹理 ==========
+    unsigned int floorTex = loadTexture("textures/marble.jpg", true);
+
+    sceneShader.use();
+    sceneShader.setInt("texture1", 0);
+    sceneShader.setInt("texture2", 1);
+
+    // Cubemap 单纹理路径（src 1-3 使用，必须在 lambda 前声明）
+    const char* cubemapSinglePaths[] = {
+        "textures/marble.jpg",
+        "textures/container.jpg",
+        "textures/floor.jpg",
+    };
+
+    // ★ 创建 Cubemap — src 0 = 天空盒六面 / src 1-3 = 单纹理贴六面
+    auto createCubemapBySource = [&](int src) -> unsigned int {
+        if (src == 0) {
+            // 尝试加载 skybox 6 张图
+            std::cout << "\n--- 尝试加载天空盒纹理 (textures/skybox/) ---" << std::endl;
+            unsigned int id = createCubemapFromSkybox("textures/skybox/");
+            // createCubemapFromSkybox 始终返回有效 ID（失败时有占位）
+            return id;
+        } else {
+            // src 1-3: 单张纹理贴六面
+            std::cout << "\n--- 从单纹理创建 Cubemap ---" << std::endl;
+            return createCubemapFromTexture(cubemapSinglePaths[src - 1]);
+        }
+    };
+
+    unsigned int cubemapTex = createCubemapBySource(0);
+
+    skyboxShader.use();
+    skyboxShader.setInt("skybox", 0);
+    reflectionShader.use();
+    reflectionShader.setInt("skybox", 0);
+    refractionShader.use();
+    refractionShader.setInt("skybox", 0);
+
+    // ========== 11. 用户控制参数 ==========
+
+    // 显示模式
+    //   0 = 天空盒 + 反射立方体
+    //   1 = 仅天空盒
+    //   2 = 天空盒 + 折射立方体
+    //   3 = 天空盒 + 反射 + 折射
+    //   4 = 天空盒 + 模型反射（背包）
+    int   displayMode    = 4;  // 默认展示模型反射
+    const char* modeNames[] = {
+        "Skybox + Reflection Cubes",
+        "Skybox Only (仅天空盒)",
+        "Skybox + Refraction Cube",
+        "Skybox + Both Cubes",
+        "Skybox + Model Reflection (背包)",
+    };
+
+    bool  showSkybox      = true;
+    bool  showFloor       = true;
+    float refractiveRatio = 0.658f;  // 空气/玻璃 ≈ 1.00/1.52
+
+    // ---- Cubemap 纹理源 ----
+    int   cubemapSource   = 0;
+    const char* cubemapSourceNames[] = {
+        "Skybox (逼真天空盒)",
+        "Marble (大理石)",
+        "Container (木箱)",
+        "Floor (地板)",
+    };
+    const int NUM_CUBEMAP_SOURCES = 4;
+
+    // ---- 摄像机 ----
+    glm::vec3 camPos   = glm::vec3(0.0f, 1.5f, 5.0f);
+    float     fov      = 50.0f;
+    float     moveSpeed = 0.08f;
+
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.1f };
+
+    // ========== 12. 加载模型 ==========
+    std::cout << "\n--- 加载背包模型 ---" << std::endl;
+    Model backpack("models/backpack/backpack.obj");
+
+    // ========== 13. 清屏 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  立方体贴图（Cubemaps）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           → 退出" << std::endl;
+    std::cout << "  WASD / 箭头   → 移动摄像机" << std::endl;
+    std::cout << "  右键拖动       → 旋转视角" << std::endl;
+    std::cout << "  1 ~ 5         → 切换显示模式" << std::endl;
+    std::cout << "  Tab           → 调试面板" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 13. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ---- 输入 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        static bool k1 = false, k2 = false, k3 = false, k4 = false, k5 = false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !k1) { k1 = true; displayMode = 0; }
+        else k1 = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !k2) { k2 = true; displayMode = 1; }
+        else k2 = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !k3) { k3 = true; displayMode = 2; }
+        else k3 = false;
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS && !k4) { k4 = true; displayMode = 3; }
+        else k4 = false;
+        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS && !k5) { k5 = true; displayMode = 4; }
+        else k5 = false;
+
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // ---- 摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) camPos += right * velocity;
+
+        // ---- MVP 矩阵 ----
+        glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view       = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ---- 清屏 ----
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ============================================================
+        // ★ 渲染地板
+        // ============================================================
+        if (showFloor) {
+            sceneShader.use();
+            sceneShader.setMat4("projection", projection);
+            sceneShader.setMat4("view", view);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, floorTex);
+            glm::mat4 planeModel = glm::mat4(1.0f);
+            sceneShader.setMat4("model", planeModel);
+            glBindVertexArray(planeVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        // ============================================================
+        // ★ 渲染反射 / 折射立方体
+        // ============================================================
+        //
+        // ★ 关键：环境映射必须关闭面剔除！
+        //   折射时，光线进入前表面后需要从后表面射出；
+        //   反射时，立方体内部面也需要参与（如凹面反射）。
+        //   如果剔除背面，某些角度看立方体会"透明"。
+        //
+        glDisable(GL_CULL_FACE);
+        glm::vec3 cubePositions[] = {
+            glm::vec3(-0.8f, 0.5f, -2.5f),
+            glm::vec3( 0.8f, 0.5f, -3.0f),
+        };
+
+        // ---- 反射立方体 ----
+        if (displayMode == 0 || displayMode == 3) {
+            reflectionShader.use();
+            reflectionShader.setMat4("projection", projection);
+            reflectionShader.setMat4("view", view);
+            reflectionShader.setVec3("cameraPos", camPos);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
+            glBindVertexArray(cubeVAO);
+
+            // 立方体 1: 静止
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), cubePositions[0]);
+            reflectionShader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+
+            // 立方体 2: 旋转（反射效果更明显）
+            model = glm::translate(glm::mat4(1.0f), cubePositions[1]);
+            model = glm::rotate(model, glm::radians(currentFrame * 30.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+            reflectionShader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
+
+        // ---- 折射立方体 ----
+        if (displayMode == 2 || displayMode == 3) {
+            refractionShader.use();
+            refractionShader.setMat4("projection", projection);
+            refractionShader.setMat4("view", view);
+            refractionShader.setVec3("cameraPos", camPos);
+            refractionShader.setFloat("refractiveRatio", refractiveRatio);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
+            glBindVertexArray(cubeVAO);
+
+            // 折射立方体位置更靠前
+            glm::vec3 refrPos = cubePositions[0] + glm::vec3(1.6f, 0.0f, 0.0f);
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), refrPos);
+            model = glm::rotate(model, glm::radians(currentFrame * -20.0f), glm::vec3(0.3f, 1.0f, 0.2f));
+            refractionShader.setMat4("model", model);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
+
+        // ---- ★ 模型反射（背包） ----
+        if (displayMode == 4) {
+            reflectionShader.use();
+            reflectionShader.setMat4("projection", projection);
+            reflectionShader.setMat4("view", view);
+            reflectionShader.setVec3("cameraPos", camPos);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(0.0f, 0.3f, -2.5f));
+            model = glm::rotate(model, glm::radians(currentFrame * 20.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::scale(model, glm::vec3(0.8f));
+            reflectionShader.setMat4("model", model);
+            backpack.Draw(reflectionShader);
+        }
+
+        glEnable(GL_CULL_FACE);  // 恢复面剔除（天空盒和地板不需要双面）
+
+        // ============================================================
+        // ★ 渲染天空盒（最后画，性能优化）
+        // ============================================================
+        //
+        // ★ 为什么要最后画？
+        //   天空盒绝大多数像素都会通过深度测试失败（被场景物体遮挡），
+        //   最后画可以利用 Early-Z 跳过被遮挡的片段着色器执行。
+        //
+        if (showSkybox) {
+            glDepthFunc(GL_LEQUAL);  // ★ 天空盒在远平面，用 LEQUAL 才能通过
+            skyboxShader.use();
+            skyboxShader.setMat4("projection", projection);
+
+            // 移除平移分量 → 天空盒始终以摄像机为中心
+            glm::mat4 viewNoTrans = glm::mat4(glm::mat3(view));
+            skyboxShader.setMat4("view", viewNoTrans);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
+            glBindVertexArray(skyboxVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+
+            glDepthFunc(GL_LESS);  // 恢复默认深度比较
+        }
+
+        // ============================================================
+        // ImGui 面板
+        // ============================================================
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel) {
+            ImGui::Begin("Debug Panel - Cubemaps");
+
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ Display Mode");
+            for (int i = 0; i < 5; i++) {
+                char label[64];
+                snprintf(label, sizeof(label), "%s##mode%d", modeNames[i], i);
+                if (ImGui::RadioButton(label, displayMode == i)) displayMode = i;
+            }
+            ImGui::Separator();
+
+            ImGui::Checkbox("Skybox", &showSkybox);
+            ImGui::SameLine();
+            ImGui::Checkbox("Floor", &showFloor);
+
+            // ---- Cubemap 纹理源 ----
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Cubemap Texture");
+            if (ImGui::BeginCombo("##cubemapSrc", cubemapSourceNames[cubemapSource])) {
+                for (int i = 0; i < NUM_CUBEMAP_SOURCES; i++) {
+                    bool sel = (cubemapSource == i);
+                    if (ImGui::Selectable(cubemapSourceNames[i], sel)) {
+                        if (cubemapSource != i) {
+                            cubemapSource = i;
+                            // 重建 cubemap（0=天空盒 / 1-3=单纹理）
+                            glDeleteTextures(1, &cubemapTex);
+                            cubemapTex = createCubemapBySource(cubemapSource);
+                        }
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::Separator();
+
+            if (displayMode == 2 || displayMode == 3) {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Refractive Ratio");
+                ImGui::SliderFloat("##ratio", &refractiveRatio, 0.5f, 1.0f, "%.3f");
+                ImGui::TextDisabled("Air/Water=0.75  Air/Glass=0.658  Air/Diamond=0.413");
+            }
+            ImGui::Separator();
+
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            ImGui::TextDisabled(
+                "1-4: Display mode   |  Tab: Panel\n"
+                "WASD/Arrows: Move   |  RClick+Drag: Look");
+
+            ImGui::End();
+        }
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 14. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &skyboxVAO);
+    glDeleteBuffers(1, &skyboxVBO);
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+    glDeleteTextures(1, &floorTex);
+    glDeleteTextures(1, &cubemapTex);
+    glfwTerminate();
+    return 0;
+}
+
+// 前向声明 —— 帧缓冲 Demo 定义在 main() 之后
+int runFramebuffersDemo();
+
+// ================================================================
+// 主函数 — 章节选择器
+// ================================================================
+
+int main()
+{
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 立方体贴图（Cubemaps）" << std::endl;
+    return runCubemapsDemo();
+    return runFramebuffersDemo();
+    return runFaceCullingDemo();
+    return runBlendingDemo();
+    return runStencilTestingDemo();
+    return runDepthTestingDemo();
+    return runModelLoadingDemo();
+    return runMultipleLightsDemo();
+    return runLightCastersDemo();
+}
+
+// ╔══════════════════════════════════════════════════════════════╗
 // ║              帧缓冲（Framebuffers）Demo                      ║
 // ╚══════════════════════════════════════════════════════════════╝
 
@@ -7007,21 +7910,4 @@ int runFramebuffersDemo()
     glDeleteFramebuffers(1, &fbo);
     glfwTerminate();
     return 0;
-}
-
-
-// ================================================================
-// 主函数 — 章节选择器
-// ================================================================
-
-int main()
-{
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 帧缓冲（Framebuffers）" << std::endl;
-    return runFramebuffersDemo();
-    return runBlendingDemo();
-    return runStencilTestingDemo();
-    return runDepthTestingDemo();
-    return runModelLoadingDemo();
-    return runMultipleLightsDemo();
-    return runLightCastersDemo();
 }

@@ -59,6 +59,9 @@
     <Filter Include="资源文件\shaders\framebuffers">
       <UniqueIdentifier>{44444444-4444-4444-frame-444444444444}</UniqueIdentifier>
     </Filter>
+    <Filter Include="资源文件\shaders\cubemaps">
+      <UniqueIdentifier>{77777777-7777-7777-cube-777777777777}</UniqueIdentifier>
+    </Filter>
 
     <!-- notes 目录树 -->
     <Filter Include="资源文件\notes">
@@ -198,6 +201,21 @@
     <None Include="shaders\framebuffers\screen.frag">
       <Filter>资源文件\shaders\framebuffers</Filter>
     </None>
+    <None Include="shaders\cubemaps\skybox.vert">
+      <Filter>资源文件\shaders\cubemaps</Filter>
+    </None>
+    <None Include="shaders\cubemaps\skybox.frag">
+      <Filter>资源文件\shaders\cubemaps</Filter>
+    </None>
+    <None Include="shaders\cubemaps\env_map.vert">
+      <Filter>资源文件\shaders\cubemaps</Filter>
+    </None>
+    <None Include="shaders\cubemaps\env_reflection.frag">
+      <Filter>资源文件\shaders\cubemaps</Filter>
+    </None>
+    <None Include="shaders\cubemaps\env_refraction.frag">
+      <Filter>资源文件\shaders\cubemaps</Filter>
+    </None>
   </ItemGroup>
 
   <!-- ======================== None: notes ======================== -->
@@ -260,6 +278,9 @@
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\20-帧缓冲-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\21-立方体贴图-知识点.md">
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\A1-渲染管线深度解析-附加.md">
