@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：立方体贴图（Cubemaps）
+ *  当前学习章节：高级数据（Advanced Data）
  * ============================================================
  */
 
@@ -7355,6 +7355,689 @@ int runCubemapsDemo()
     return 0;
 }
 
+// ╔══════════════════════════════════════════════════════════════╗
+// ║           高级数据（Advanced Data）Demo                       ║
+// ╚══════════════════════════════════════════════════════════════╝
+//
+// 高级数据是「高级 OpenGL」的第七章。
+//
+// 核心知识点：
+//   ① glBufferSubData     — 填充缓冲区的特定区域（而非整个缓冲区）
+//   ② glMapBuffer         — 获取缓冲区内存指针，直接写入数据
+//   ③ 分批 vs 交错布局     — 顶点属性在 VBO 中的两种组织方式
+//   ④ glCopyBufferSubData — 在 VBO 之间复制数据
+//
+// 本 Demo：
+//   3 个彩色立方体并排展示，每个使用不同的缓冲区策略：
+//   - Cube A：交错布局（Interleaved）+ glBufferData（传统一次性填充）
+//   - Cube B：分批布局（Batched）+ glBufferSubData（先分配，再分两次填入）
+//   - Cube C：交错布局 + glMapBuffer（每帧映射内存做呼吸动画）
+//   - ImGui 面板展示每种策略的缓冲区布局和字节偏移
+//   - "Copy Buffer" 按钮演示 glCopyBufferSubData
+
+int runAdvancedDataDemo()
+{
+    const unsigned int SCR_WIDTH  = 1100;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Advanced Data | 1-3:Highlight Tab:Panel RClick:Look",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "x Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "x Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. OpenGL 状态 ==========
+    //
+    // ★ 关闭面剔除 —— 本章重点是缓冲区管理，关闭剔除避免 winding 干扰
+    //
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    // ========== 4. 鼠标回调（FPS 视角）==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 400.0, lastMY = 300.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) {
+            lastMX = xpos;
+            lastMY = ypos;
+            firstMouse = false;
+        }
+        double dx = xpos - lastMX;
+        double dy = lastMY - ypos;
+        lastMX = xpos;
+        lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    initImGuiWithChinese(window);
+
+    // ========== 6. 编译着色器 ==========
+    Shader shader("shaders/advanced_data/adv_data.vert",
+                  "shaders/advanced_data/adv_data.frag", true);
+
+    // ========== 7. 生成立方体顶点数据（交错布局）==========
+    //
+    // 一个彩色立方体，每个面一种颜色（6 面 × 2 三角形 × 3 顶点 = 36 顶点）
+    // 每个顶点: pos(3 floats) + color(3 floats) = 6 floats
+    // 总计: 36 × 6 = 216 floats = 864 bytes
+    //
+    // 颜色表：
+    //   +X = Red, -X = Green, +Y = Blue, -Y = Yellow, +Z = Cyan, -Z = Magenta
+
+    float interleavedVertices[] = {
+        // ── Face +X (right, x=+0.5) — Red ──
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, +0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+
+        // ── Face -X (left, x=-0.5) — Green ──
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+
+        // ── Face +Y (top, y=+0.5) — Blue ──
+        +0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+        +0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+        +0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+
+        // ── Face -Y (bottom, y=-0.5) — Yellow ──
+        +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+
+        // ── Face +Z (front, z=+0.5) — Cyan ──
+        +0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        +0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        +0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+
+        // ── Face -Z (back, z=-0.5) — Magenta ──
+        -0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+    };
+
+    const int NUM_VERTICES     = 36;
+    const int FLOATS_PER_VERT  = 6;          // pos(3) + color(3)
+    const int TOTAL_FLOATS     = NUM_VERTICES * FLOATS_PER_VERT;  // 216
+    const int TOTAL_BYTES      = TOTAL_FLOATS * sizeof(float);    // 864
+    const int POS_FLOATS       = NUM_VERTICES * 3;  // 108
+    const int POS_BYTES        = POS_FLOATS * sizeof(float);     // 432
+    const int COL_BYTES        = POS_BYTES;  // 432 (3 floats × 36)
+
+    // ========== 8. Cube A —— 交错布局 + glBufferData ==========
+    //
+    // ★ 传统做法：所有顶点数据在一个数组里，pos1,color1,pos2,color2,...
+    //   一次 glBufferData 调用填充整个 VBO
+    //
+    // 缓冲区布局:
+    //   | 0       | 12      | 24      | 36      | ...
+    //   | pos0    | color0  | pos1    | color1  | ...
+    //   stride = 24 bytes (6 floats)
+    //   position offset = 0, color offset = 12
+
+    unsigned int vboA, vaoA;
+    glGenVertexArrays(1, &vaoA);
+    glGenBuffers(1, &vboA);
+    glBindVertexArray(vaoA);
+    glBindBuffer(GL_ARRAY_BUFFER, vboA);
+    glBufferData(GL_ARRAY_BUFFER, TOTAL_BYTES, interleavedVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
+    // ========== 9. Cube B —— 分批布局 + glBufferSubData ==========
+    //
+    // ★ 分批（Batched）布局：所有位置在前，所有颜色在后
+    //   先用 glBufferData(data=NULL) 预分配内存，
+    //   再用 glBufferSubData 分两次填入位置和颜色
+    //
+    // 缓冲区布局:
+    //   | 0                | POS_BYTES (432)   |
+    //   | pos0, pos1, ...  | color0, color1, ... |
+    //   位置 stride = 12 (3 floats)，颜色 stride = 12 (3 floats)
+    //
+    // ★ glBufferSubData 原型:
+    //   void glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void* data);
+    //
+    //   - target: 缓冲目标（如 GL_ARRAY_BUFFER）
+    //   - offset: 写入起始偏移（单位：字节）
+    //   - size:   写入数据大小（单位：字节）
+    //   - data:   数据指针
+
+    // 从交错数据中提取纯位置数组和纯颜色数组
+    float batchedPositions[108];  // 36 vertices × 3 floats
+    float batchedColors[108];     // 36 vertices × 3 floats
+    for (int i = 0; i < NUM_VERTICES; i++) {
+        int srcBase = i * FLOATS_PER_VERT;     // i × 6
+        int dstBase = i * 3;
+        batchedPositions[dstBase + 0] = interleavedVertices[srcBase + 0];
+        batchedPositions[dstBase + 1] = interleavedVertices[srcBase + 1];
+        batchedPositions[dstBase + 2] = interleavedVertices[srcBase + 2];
+        batchedColors   [dstBase + 0] = interleavedVertices[srcBase + 3];
+        batchedColors   [dstBase + 1] = interleavedVertices[srcBase + 4];
+        batchedColors   [dstBase + 2] = interleavedVertices[srcBase + 5];
+    }
+
+    unsigned int vboB, vaoB;
+    glGenVertexArrays(1, &vaoB);
+    glGenBuffers(1, &vboB);
+    glBindVertexArray(vaoB);
+    glBindBuffer(GL_ARRAY_BUFFER, vboB);
+
+    // ★ 第一步：用 NULL 预分配内存（只分配，不填数据）
+    glBufferData(GL_ARRAY_BUFFER, TOTAL_BYTES, NULL, GL_STATIC_DRAW);
+
+    // ★ 第二步：用 glBufferSubData 分两次填入数据
+    glBufferSubData(GL_ARRAY_BUFFER, 0,        POS_BYTES, batchedPositions);  // 位置 → offset 0
+    glBufferSubData(GL_ARRAY_BUFFER, POS_BYTES, COL_BYTES, batchedColors);    // 颜色 → offset 432
+
+    // ★ 位置属性：stride = 3 floats（只有 3 个紧挨着的位置分量）
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    // ★ 颜色属性：stride = 3 floats，offset = POS_BYTES（跳过后面的位置数据）
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
+                          (void*)(size_t)POS_BYTES);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
+    // ========== 10. Cube C —— glMapBuffer（每帧动态更新）==========
+    //
+    // ★ glMapBuffer 返回 GPU 缓冲区内存的 CPU 可访问指针
+    //   写入后调用 glUnmapBuffer 通知 OpenGL 数据已就绪
+    //
+    // 原型:
+    //   void* glMapBuffer(GLenum target, GLenum access);
+    //     - target: 缓冲目标
+    //     - access: GL_READ_ONLY / GL_WRITE_ONLY / GL_READ_WRITE
+    //     - 返回: 指向缓冲区内存的指针，失败返回 NULL
+    //
+    //   GLboolean glUnmapBuffer(GLenum target);
+    //     - 返回 GL_TRUE 表示数据成功写回
+
+    unsigned int vboC, vaoC;
+    glGenVertexArrays(1, &vaoC);
+    glGenBuffers(1, &vboC);
+    glBindVertexArray(vaoC);
+    glBindBuffer(GL_ARRAY_BUFFER, vboC);
+    glBufferData(GL_ARRAY_BUFFER, TOTAL_BYTES, interleavedVertices, GL_DYNAMIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
+    // ========== 11. 用户控制参数 ==========
+
+    glm::vec3 camPos     = glm::vec3(0.0f, 1.5f, 6.0f);
+    float     fov        = 50.0f;
+    float     moveSpeed  = 0.08f;
+
+    // Cube C 动画参数
+    bool  animateCubeC    = true;
+    float animAmplitude   = 0.12f;   // 呼吸振幅
+    float animSpeed       = 2.0f;    // 动画速度
+
+    // 高亮某个立方体的缓冲区信息（0=None, 1=A, 2=B, 3=C）
+    int   highlightBuffer = 0;
+    const char* cubeNames[] = { "None", "Cube A (Interleaved)", "Cube B (Batched)", "Cube C (MapBuffer)" };
+
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.08f, 0.08f, 0.12f };
+
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 12. 控制台帮助 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  高级数据（Advanced Data）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           -> 退出" << std::endl;
+    std::cout << "  WASD / 箭头   -> 移动摄像机" << std::endl;
+    std::cout << "  右键拖动       -> 旋转视角" << std::endl;
+    std::cout << "  1 / 2 / 3     -> 高亮缓存区布局" << std::endl;
+    std::cout << "  Tab           -> 调试面板" << std::endl;
+    std::cout << "  C             -> Cube A -> Cube C 拷贝缓冲区" << std::endl;
+    std::cout << "  R             -> 重置 Cube C 动画" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 13. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ---- 输入 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // 数字键高亮
+        static bool k1 = false, k2 = false, k3 = false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !k1) { k1 = true; highlightBuffer = 1; }
+        else k1 = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !k2) { k2 = true; highlightBuffer = 2; }
+        else k2 = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !k3) { k3 = true; highlightBuffer = 3; }
+        else k3 = false;
+
+        // C 键 — 复制缓冲区（glCopyBufferSubData）
+        static bool cPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS && !cPressed) {
+            cPressed = true;
+            // ★ glCopyBufferSubData 演示
+            //
+            // 原型:
+            //   void glCopyBufferSubData(GLenum readTarget, GLenum writeTarget,
+            //                            GLintptr readOffset, GLintptr writeOffset,
+            //                            GLsizeiptr size);
+            //
+            // 问题：两个 VBO 不能同时绑定到同一个 GL_ARRAY_BUFFER 目标
+            // 解决：使用专用目标 GL_COPY_READ_BUFFER / GL_COPY_WRITE_BUFFER
+            //
+            glBindBuffer(GL_COPY_READ_BUFFER, vboA);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, vboC);
+            glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+                                0, 0, TOTAL_BYTES);
+
+            // 恢复绑定（避免影响后续操作）
+            glBindBuffer(GL_COPY_READ_BUFFER, 0);
+            glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+
+            animateCubeC = false;  // 拷贝后暂停动画，便于观察结果
+            std::cout << "✓ glCopyBufferSubData: Cube A → Cube C ("
+                      << TOTAL_BYTES << " bytes)" << std::endl;
+        }
+        else cPressed = false;
+
+        // R 键 — 重置动画
+        static bool rPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS && !rPressed) {
+            rPressed = true;
+            animateCubeC = true;
+            std::cout << "✓ 重置 Cube C 动画" << std::endl;
+        }
+        else rPressed = false;
+
+        // Tab — 调试面板
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // ---- 摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_LEFT)  == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) camPos += right * velocity;
+
+        // ---- MVP 矩阵 ----
+        glm::mat4 projection = glm::perspective(glm::radians(fov),
+            (float)SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ---- 清屏 ----
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ============================================================
+        // ★ 更新 Cube C 顶点（glMapBuffer 动画）
+        // ============================================================
+        if (animateCubeC) {
+            glBindBuffer(GL_ARRAY_BUFFER, vboC);
+
+            // ★ glMapBuffer — 获取 GPU 缓冲区的 CPU 可写指针
+            float* mapped = (float*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+
+            if (mapped) {
+                // "呼吸"效果：每个顶点沿其位置方向（即法线方向，对于中心在原点
+                // 的立方体来说，位置方向 ≈ 法线方向）略微缩放
+                //
+                // 缩放因子 = 1.0 + amplitude * sin(time * speed)
+                float scale = 1.0f + animAmplitude * sin(currentFrame * animSpeed);
+
+                for (int i = 0; i < NUM_VERTICES; i++) {
+                    int base = i * FLOATS_PER_VERT;
+
+                    // ★ 注意：我们只修改位置分量（base+0, base+1, base+2）
+                    //   颜色分量（base+3, base+4, base+5）保持原样
+                    //
+                    mapped[base + 0] = interleavedVertices[base + 0] * scale;
+                    mapped[base + 1] = interleavedVertices[base + 1] * scale;
+                    mapped[base + 2] = interleavedVertices[base + 2] * scale;
+                    mapped[base + 3] = interleavedVertices[base + 3];  // R
+                    mapped[base + 4] = interleavedVertices[base + 4];  // G
+                    mapped[base + 5] = interleavedVertices[base + 5];  // B
+                }
+
+                // ★ glUnmapBuffer — 通知 OpenGL 数据写入完成
+                //   返回 GL_TRUE 表示成功
+                glUnmapBuffer(GL_ARRAY_BUFFER);
+            }
+
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+        }
+
+        // ============================================================
+        // ★ 渲染三个立方体
+        // ============================================================
+        shader.use();
+        shader.setMat4("projection", projection);
+        shader.setMat4("view", view);
+
+        glm::vec3 cubePositions[] = {
+            glm::vec3(-2.0f, 0.0f, 0.0f),   // Cube A — Interleaved
+            glm::vec3( 0.0f, 0.0f, 0.0f),   // Cube B — Batched
+            glm::vec3(+2.0f, 0.0f, 0.0f),   // Cube C — MapBuffer
+        };
+
+        // 字母标签颜色（高亮时使用亮色）
+        glm::vec3 labelColors[] = {
+            glm::vec3(1.0f, 0.4f, 0.4f),   // A — Red
+            glm::vec3(0.4f, 1.0f, 0.4f),   // B — Green
+            glm::vec3(0.4f, 0.6f, 1.0f),   // C — Blue
+        };
+
+        // Cube A
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[0]);
+            model = glm::rotate(model, glm::radians(currentFrame * 15.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+            shader.setMat4("model", model);
+            glBindVertexArray(vaoA);
+            glDrawArrays(GL_TRIANGLES, 0, NUM_VERTICES);
+        }
+
+        // Cube B
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[1]);
+            model = glm::rotate(model, glm::radians(currentFrame * 15.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+            shader.setMat4("model", model);
+            glBindVertexArray(vaoB);
+            glDrawArrays(GL_TRIANGLES, 0, NUM_VERTICES);
+        }
+
+        // Cube C
+        {
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[2]);
+            model = glm::rotate(model, glm::radians(currentFrame * 15.0f), glm::vec3(0.5f, 1.0f, 0.0f));
+            shader.setMat4("model", model);
+            glBindVertexArray(vaoC);
+            glDrawArrays(GL_TRIANGLES, 0, NUM_VERTICES);
+        }
+
+        // ============================================================
+        // ★ 高亮选中立方体的线框（3D 可视化反馈）
+        // ============================================================
+        if (highlightBuffer >= 1 && highlightBuffer <= 3) {
+            unsigned int highlightVAO = (highlightBuffer == 1) ? vaoA
+                                     : (highlightBuffer == 2) ? vaoB : vaoC;
+
+            glm::mat4 hlModel = glm::mat4(1.0f);
+            hlModel = glm::translate(hlModel, cubePositions[highlightBuffer - 1]);
+            hlModel = glm::rotate(hlModel, glm::radians(currentFrame * 15.0f),
+                                  glm::vec3(0.5f, 1.0f, 0.0f));
+            hlModel = glm::scale(hlModel, glm::vec3(1.06f));  // 略大一圈，包裹在原立方体外
+            shader.setMat4("model", hlModel);
+
+            // 用线框模式 + 加粗线条绘制，形成明显的"笼子"效果
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            glLineWidth(2.5f);
+            glBindVertexArray(highlightVAO);
+            glDrawArrays(GL_TRIANGLES, 0, NUM_VERTICES);
+
+            // 恢复填充模式
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glLineWidth(1.0f);
+        }
+
+        glBindVertexArray(0);
+
+        // ============================================================
+        // ★ ImGui 调试面板
+        // ============================================================
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel) {
+            ImGui::Begin("Debug Panel - Advanced Data");
+
+            // ---- FPS ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 缓冲区高亮选择 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ 选择缓冲策略查看详情 (键盘 1/2/3)");
+            ImGui::Spacing();
+            for (int i = 0; i < 4; i++) {
+                char label[64];
+                snprintf(label, sizeof(label), "%s##highlight%d", cubeNames[i], i);
+                if (ImGui::RadioButton(label, highlightBuffer == i)) highlightBuffer = i;
+            }
+            ImGui::Separator();
+
+            // ---- 根据选择显示对应的缓冲区布局详情 ----
+            if (highlightBuffer == 0) {
+                ImGui::TextDisabled("↑ 选择一个立方体查看其缓冲区内部布局");
+                ImGui::TextDisabled("   每个立方体使用不同的 VBO 填充策略");
+            }
+            else if (highlightBuffer == 1) {
+                // Cube A: Interleaved
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.5f, 1.0f));
+                ImGui::Text("━━━ Cube A: 交错布局 (Interleaved) ━━━");
+                ImGui::PopStyleColor();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "API: glBufferData (一次性填充整个 VBO)");
+                ImGui::Spacing();
+                ImGui::Text("数据排列 (stride = 24 bytes):");
+                ImGui::TextDisabled(
+                    "  Offset 0   12   24   36   48   60  ...\n"
+                    "  +------+------+------+------+------+------+\n"
+                    "  | pos0 | col0 | pos1 | col1 | pos2 | col2 | ...\n"
+                    "  +------+------+------+------+------+------+\n"
+                    "    xyz    rgb    xyz    rgb    xyz    rgb");
+                ImGui::Spacing();
+                ImGui::BulletText("Vertex Count:  %d", NUM_VERTICES);
+                ImGui::BulletText("Total Bytes:   %d (216 floats)", TOTAL_BYTES);
+                ImGui::BulletText("Position: offset 0,  stride 24 bytes");
+                ImGui::BulletText("Color:    offset 12, stride 24 bytes");
+                ImGui::Spacing();
+                ImGui::TextDisabled("C++: glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);");
+            }
+            else if (highlightBuffer == 2) {
+                // Cube B: Batched
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1.0f, 0.5f, 1.0f));
+                ImGui::Text("━━━ Cube B: 分批布局 (Batched) ━━━");
+                ImGui::PopStyleColor();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                                   "API: glBufferData(NULL) 预分配 + glBufferSubData 分两次填入");
+                ImGui::Spacing();
+                ImGui::Text("数据排列:");
+                ImGui::TextDisabled(
+                    "  Offset 0              432              864\n"
+                    "  +-------------------++-------------------+\n"
+                    "  | pos0 pos1 ...pos35 || col0 col1 ...col35|\n"
+                    "  +-------------------++-------------------+\n"
+                    "    108 floats (位置)    108 floats (颜色)");
+                ImGui::Spacing();
+                ImGui::BulletText("Vertex Count:  %d", NUM_VERTICES);
+                ImGui::BulletText("Total Bytes:   %d (216 floats)", TOTAL_BYTES);
+                ImGui::BulletText("Position: offset 0,   stride 12 bytes");
+                ImGui::BulletText("Color:    offset 432, stride 12 bytes");
+                ImGui::Spacing();
+                ImGui::TextDisabled(
+                    "C++:\n"
+                    "  glBufferData(ARRAY_BUFFER, 864, NULL, STATIC_DRAW);  // 只分配\n"
+                    "  glBufferSubData(ARRAY_BUFFER, 0,   432, positions);  // 填位置\n"
+                    "  glBufferSubData(ARRAY_BUFFER, 432, 432, colors);     // 填颜色");
+            }
+            else if (highlightBuffer == 3) {
+                // Cube C: MapBuffer
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.7f, 1.0f, 1.0f));
+                ImGui::Text("━━━ Cube C: 内存映射 (glMapBuffer) ━━━");
+                ImGui::PopStyleColor();
+                ImGui::Spacing();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                                   "API: glMapBuffer / glUnmapBuffer (每帧获取 GPU 指针)");
+                ImGui::Spacing();
+                ImGui::Text("数据排列: 同 Cube A (交错布局)");
+                ImGui::Text("Usage Hint: GL_DYNAMIC_DRAW (频繁修改)");
+                ImGui::Spacing();
+                ImGui::BulletText("Vertex Count:  %d", NUM_VERTICES);
+                ImGui::BulletText("Total Bytes:   %d (216 floats)", TOTAL_BYTES);
+                ImGui::BulletText("动画: 顶点沿法线方向缩放 (呼吸效果)");
+                ImGui::Spacing();
+                ImGui::TextDisabled(
+                    "C++ (每帧执行):\n"
+                    "  float* p = (float*)glMapBuffer(ARRAY_BUFFER, WRITE_ONLY);\n"
+                    "  for (int i = 0; i < 36; i++) {\n"
+                    "      p[i*6+0] = baseVertex[i*6+0] * scale;  // 修改位置\n"
+                    "      p[i*6+1] = baseVertex[i*6+1] * scale;\n"
+                    "      p[i*6+2] = baseVertex[i*6+2] * scale;\n"
+                    "  }\n"
+                    "  glUnmapBuffer(ARRAY_BUFFER);  // 通知 GPU 更新完毕");
+            }
+            ImGui::Separator();
+
+            // ---- Cube C 动画控制 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ Cube C Animation");
+            ImGui::Checkbox("Animate (glMapBuffer)", &animateCubeC);
+            ImGui::SliderFloat("Amplitude", &animAmplitude, 0.02f, 0.3f, "%.3f");
+            ImGui::SliderFloat("Speed", &animSpeed, 0.5f, 5.0f, "%.1f");
+            ImGui::Spacing();
+
+            // ---- 操作按钮 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ Buffer Operations");
+            if (ImGui::Button("Copy Cube A → Cube C (glCopyBufferSubData)", ImVec2(320, 30))) {
+                glBindBuffer(GL_COPY_READ_BUFFER, vboA);
+                glBindBuffer(GL_COPY_WRITE_BUFFER, vboC);
+                glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+                                    0, 0, TOTAL_BYTES);
+                glBindBuffer(GL_COPY_READ_BUFFER, 0);
+                glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+                animateCubeC = false;
+                std::cout << "✓ glCopyBufferSubData: " << TOTAL_BYTES
+                          << " bytes (A -> C)" << std::endl;
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Reset Animation", ImVec2(140, 30))) {
+                animateCubeC = true;
+                std::cout << "✓ Cube C animation reset" << std::endl;
+            }
+
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            // ---- 清屏颜色 ----
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // ---- 快捷键提示 ----
+            ImGui::TextDisabled(
+                "1/2/3: Highlight buffer | Tab: Panel\n"
+                "C: Copy A->C | R: Reset anim\n"
+                "WASD/Arrows: Move | RClick+Drag: Look");
+
+            ImGui::End();
+        }
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 14. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &vaoA);
+    glDeleteBuffers(1, &vboA);
+    glDeleteVertexArrays(1, &vaoB);
+    glDeleteBuffers(1, &vboB);
+    glDeleteVertexArrays(1, &vaoC);
+    glDeleteBuffers(1, &vboC);
+    glfwTerminate();
+    return 0;
+}
+
 // 前向声明 —— 帧缓冲 Demo 定义在 main() 之后
 int runFramebuffersDemo();
 
@@ -7364,7 +8047,8 @@ int runFramebuffersDemo();
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 立方体贴图（Cubemaps）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 高级数据（Advanced Data）" << std::endl;
+    return runAdvancedDataDemo();
     return runCubemapsDemo();
     return runFramebuffersDemo();
     return runFaceCullingDemo();

@@ -62,6 +62,9 @@
     <Filter Include="资源文件\shaders\cubemaps">
       <UniqueIdentifier>{77777777-7777-7777-cube-777777777777}</UniqueIdentifier>
     </Filter>
+    <Filter Include="资源文件\shaders\advanced_data">
+      <UniqueIdentifier>{88888888-8888-8888-advd-888888888888}</UniqueIdentifier>
+    </Filter>
 
     <!-- notes 目录树 -->
     <Filter Include="资源文件\notes">
@@ -216,6 +219,12 @@
     <None Include="shaders\cubemaps\env_refraction.frag">
       <Filter>资源文件\shaders\cubemaps</Filter>
     </None>
+    <None Include="shaders\advanced_data\adv_data.vert">
+      <Filter>资源文件\shaders\advanced_data</Filter>
+    </None>
+    <None Include="shaders\advanced_data\adv_data.frag">
+      <Filter>资源文件\shaders\advanced_data</Filter>
+    </None>
   </ItemGroup>
 
   <!-- ======================== None: notes ======================== -->
@@ -281,6 +290,9 @@
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\21-立方体贴图-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\22-高级数据-知识点.md">
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\A1-渲染管线深度解析-附加.md">
