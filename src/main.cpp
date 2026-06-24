@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：高级数据（Advanced Data）
+ *  当前学习章节：高级GLSL（Advanced GLSL）
  * ============================================================
  */
 
@@ -8038,6 +8038,485 @@ int runAdvancedDataDemo()
     return 0;
 }
 
+// ╔══════════════════════════════════════════════════════════════╗
+// ║              高级GLSL（Advanced GLSL）Demo                   ║
+// ╚══════════════════════════════════════════════════════════════╝
+//
+// 高级GLSL 是「高级 OpenGL」的第八章。
+//
+// 核心知识点：
+//   ① GLSL 内建变量     — gl_FragCoord、gl_FrontFacing 等
+//   ② 接口块             — VS_OUT / FS_IN 块组织着色器间变量传递
+//   ③ Uniform 缓冲对象   — UBO 在多个着色器程序间共享矩阵数据
+//   ④ std140 布局        — 确保统一块内偏移量可预测
+//
+// 本 Demo：
+//   4 个彩色立方体并排展示，使用 UBO 共享 projection / view 矩阵：
+//   - 左侧 2 个立方体：着色器 A — 演示 gl_FragCoord（屏幕位置渐变）
+//   - 右侧 2 个立方体：着色器 B — 演示 gl_FrontFacing（正面/背面双色）
+//   - ImGui 面板展示 UBO 内存布局和 std140 对齐规则
+
+int runAdvancedGLSLDemo()
+{
+    const unsigned int SCR_WIDTH  = 1100;
+    const unsigned int SCR_HEIGHT = 700;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Advanced GLSL | 1-4:Shader Tab:Panel RClick:Look",
+        NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "x Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "x Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    // ========== 3. OpenGL 状态 ==========
+    //
+    // ★ 关闭面剔除 —— 着色器 B 使用 gl_FrontFacing 展示正面/背面双色，
+    //    必须关闭面剔除才能看到背面效果。
+    //
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    // ========== 4. 鼠标回调（FPS 视角）==========
+    static float camYaw   = -90.0f;
+    static float camPitch = 0.0f;
+    static bool  firstMouse = true;
+    static double lastMX = 400.0, lastMY = 300.0;
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow* win, double xpos, double ypos) {
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) != GLFW_PRESS) {
+            firstMouse = true;
+            return;
+        }
+        if (firstMouse) {
+            lastMX = xpos;
+            lastMY = ypos;
+            firstMouse = false;
+        }
+        double dx = xpos - lastMX;
+        double dy = lastMY - ypos;
+        lastMX = xpos;
+        lastMY = ypos;
+        camYaw   += (float)dx * 0.1f;
+        camPitch += (float)dy * 0.1f;
+        camPitch = glm::clamp(camPitch, -89.0f, 89.0f);
+    });
+
+    // ========== 5. 初始化 ImGui ==========
+    initImGuiWithChinese(window);
+
+    // ========== 6. 编译着色器 ==========
+    //
+    // ★ 两个着色器程序使用相同的顶点着色器，但不同的片段着色器
+    //   两者共享同一个 UBO（Matrices 块）
+    //
+    //   Shader A: 演示 gl_FragCoord（屏幕坐标渐变）
+    //   Shader B: 演示 gl_FrontFacing（正面/背面双色）
+    //
+    Shader shaderA("shaders/advanced_glsl/adv_glsl.vert",
+                   "shaders/advanced_glsl/adv_glsl_a.frag", true);
+    Shader shaderB("shaders/advanced_glsl/adv_glsl.vert",
+                   "shaders/advanced_glsl/adv_glsl_b.frag", true);
+
+    // ========== 7. 创建 Uniform 缓冲对象（UBO）==========
+    //
+    // ★ UBO 存放 projection 和 view 两个 mat4 矩阵（共 128 bytes）
+    //   两个着色器程序共享此 UBO，无需分别设置 projection/view
+    //
+    // std140 布局：
+    //   | offset 0  | mat4 projection | 64 bytes
+    //   | offset 64 | mat4 view       | 64 bytes
+    //   总计: 128 bytes
+    //
+    // 步骤：
+    //   ① 获取每个着色器的 Matrices 块索引
+    //   ② 将块索引绑定到 binding point 0
+    //   ③ 创建 UBO，分配 128 bytes
+    //   ④ 将 UBO 绑定到 binding point 0
+
+    unsigned int blockIndexA = glGetUniformBlockIndex(shaderA.ID, "Matrices");
+    unsigned int blockIndexB = glGetUniformBlockIndex(shaderB.ID, "Matrices");
+    glUniformBlockBinding(shaderA.ID, blockIndexA, 0);
+    glUniformBlockBinding(shaderB.ID, blockIndexB, 0);
+
+    unsigned int uboMatrices;
+    glGenBuffers(1, &uboMatrices);
+    glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
+    glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), NULL, GL_STATIC_DRAW);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    // 将 UBO 绑定到 binding point 0（范围：整个 buffer）
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, uboMatrices, 0, 2 * sizeof(glm::mat4));
+
+    std::cout << "✓ UBO 创建完成: 128 bytes (projection + view)" << std::endl;
+    std::cout << "  Shader A block index: " << blockIndexA << std::endl;
+    std::cout << "  Shader B block index: " << blockIndexB << std::endl;
+
+    // ========== 8. 生成立方体顶点数据 ==========
+    //
+    // 四个彩色立方体，每个面一种颜色（6 面 × 2 三角形 × 3 顶点 = 36 顶点）
+    // 每个顶点: pos(3) + color(3) = 6 floats
+
+    float cubeVertices[] = {
+        // ── Face +X (right) — Red ──
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, +0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 0.2f, 0.2f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 0.2f,
+
+        // ── Face -X (left) — Green ──
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  0.2f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 0.2f,
+
+        // ── Face +Y (top) — Blue ──
+        +0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+        +0.5f, +0.5f, +0.5f,  0.2f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+        +0.5f, +0.5f, -0.5f,  0.2f, 0.2f, 1.0f,
+
+        // ── Face -Y (bottom) — Yellow ──
+        +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.2f,
+        -0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+        +0.5f, -0.5f, +0.5f,  1.0f, 1.0f, 0.2f,
+
+        // ── Face +Z (front) — Cyan ──
+        +0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        +0.5f, +0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        -0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+        +0.5f, -0.5f, +0.5f,  0.2f, 1.0f, 1.0f,
+
+        // ── Face -Z (back) — Magenta ──
+        -0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        -0.5f, +0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        +0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.2f, 1.0f,
+    };
+
+    const int NUM_VERTICES  = 36;
+    const int FLOATS_PER_V  = 6;       // pos(3) + color(3)
+    const int TOTAL_BYTES   = NUM_VERTICES * FLOATS_PER_V * sizeof(float); // 864
+
+    // ========== 9. 创建 VAO / VBO ==========
+    unsigned int cubeVAO, cubeVBO;
+    glGenVertexArrays(1, &cubeVAO);
+    glGenBuffers(1, &cubeVBO);
+    glBindVertexArray(cubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
+    glBufferData(GL_ARRAY_BUFFER, TOTAL_BYTES, cubeVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
+    // ========== 10. 四个立方体的位置 ==========
+    glm::vec3 cubePositions[] = {
+        glm::vec3(-2.5f,  0.0f,  0.0f),   // Shader A — gl_FragCoord demo
+        glm::vec3(-0.8f,  0.0f,  0.0f),   // Shader A — gl_FragCoord demo
+        glm::vec3(+0.8f,  0.0f,  0.0f),   // Shader B — gl_FrontFacing demo
+        glm::vec3(+2.5f,  0.0f,  0.0f),   // Shader B — gl_FrontFacing demo
+    };
+
+    // 每个立方体的标签
+    const char* cubeLabels[] = {
+        "A1 (gl_FragCoord)",
+        "A2 (gl_FragCoord)",
+        "B1 (gl_FrontFacing)",
+        "B2 (gl_FrontFacing)",
+    };
+
+    // ========== 11. 用户控制参数 ==========
+    glm::vec3 camPos    = glm::vec3(0.0f, 1.5f, 7.0f);
+    float     fov       = 50.0f;
+    float     moveSpeed = 0.08f;
+
+    bool  showDebugPanel  = true;
+    int   highlightShader = 0;  // 0=Both, 1=Shader A only, 2=Shader B only
+    float clearColor[3]   = { 0.08f, 0.08f, 0.12f };
+
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 12. 控制台帮助 ==========
+    std::cout << "\n============================================" << std::endl;
+    std::cout << "  高级GLSL（Advanced GLSL）" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "  ESC           -> 退出" << std::endl;
+    std::cout << "  WASD / 箭头   -> 移动摄像机" << std::endl;
+    std::cout << "  右键拖动       -> 旋转视角" << std::endl;
+    std::cout << "  Tab            -> 显示/隐藏面板" << std::endl;
+    std::cout << "  1 / 2 / 3     -> 切换着色器显示模式" << std::endl;
+    std::cout << std::endl;
+    std::cout << "  ★ 左侧 2 个立方体: Shader A — gl_FragCoord 屏幕坐标渐变" << std::endl;
+    std::cout << "  ★ 右侧 2 个立方体: Shader B — gl_FrontFacing 正/背面双色" << std::endl;
+    std::cout << "  ★ 两个着色器共享同一个 UBO（projection + view）" << std::endl;
+    std::cout << "============================================\n" << std::endl;
+
+    // ========== 13. 渲染循环 ==========
+    while (!glfwWindowShouldClose(window))
+    {
+        static float lastFrame = 0.0f;
+        float currentFrame = (float)glfwGetTime();
+        float deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ---- 输入 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // 数字键切换着色器（防抖）
+        static bool d1 = false, d2 = false, d3 = false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !d1) { d1 = true; highlightShader = 0; }
+        else d1 = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !d2) { d2 = true; highlightShader = 1; }
+        else d2 = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !d3) { d3 = true; highlightShader = 2; }
+        else d3 = false;
+
+        // Tab 切换面板（防抖）
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // ---- 摄像机移动 ----
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 front;
+        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front.y = sin(glm::radians(camPitch));
+        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        front = glm::normalize(front);
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camPos -= front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camPos -= right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camPos += right * velocity;
+        if (glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS) camPos += front * velocity;
+        if (glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS) camPos -= front * velocity;
+
+        // ---- 清除 ----
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ---- 计算 MVP 矩阵 ----
+        glm::mat4 projection = glm::perspective(glm::radians(fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+
+        glm::mat4 view = glm::lookAt(camPos, camPos + front, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // ============================================================
+        // ★ 更新 UBO（一次写入，两个着色器共享）
+        // ============================================================
+        glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(projection));
+        glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(view));
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+        glBindVertexArray(cubeVAO);
+
+        // ---- 绘制 4 个立方体 ----
+        for (int i = 0; i < 4; i++)
+        {
+            // 根据 highlightShader 过滤
+            if (highlightShader == 1 && i >= 2) continue;  // 只看 Shader A
+            if (highlightShader == 2 && i < 2)  continue;  // 只看 Shader B
+
+            // 选择着色器
+            Shader& shader = (i < 2) ? shaderA : shaderB;
+            shader.use();
+
+            // 设置 model 矩阵（每个物体独立，不放在 UBO 中）
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, cubePositions[i]);
+            model = glm::rotate(model, glm::radians(currentFrame * 20.0f + i * 45.0f),
+                                glm::vec3(0.5f, 1.0f, 0.0f));
+            shader.setMat4("model", model);
+
+            glDrawArrays(GL_TRIANGLES, 0, NUM_VERTICES);
+        }
+
+        glBindVertexArray(0);
+
+        // ============================================================
+        // ★ ImGui 调试面板
+        // ============================================================
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Advanced GLSL");
+
+            // ---- FPS ----
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                        1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- UBO 信息 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ Uniform Buffer Object (UBO)");
+            ImGui::Spacing();
+            ImGui::BulletText("UBO ID: %u", uboMatrices);
+            ImGui::BulletText("Size: 128 bytes (2 × mat4)");
+            ImGui::BulletText("Binding Point: 0");
+            ImGui::BulletText("Shared by: Shader A + Shader B");
+            ImGui::Spacing();
+
+            // std140 布局可视化
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "std140 内存布局:");
+            ImGui::TextDisabled(
+                "  Offset   Content             Size\n"
+                "  ─────────────────────────────────\n"
+                "  0        mat4 projection      64 B\n"
+                "  64       mat4 view            64 B\n"
+                "  ─────────────────────────────────\n"
+                "  Total: 128 bytes");
+            ImGui::Spacing();
+
+            // uniform 块绑定信息
+            ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "Uniform 块绑定:");
+            ImGui::BulletText("Shader A 'Matrices' block index: %u -> binding 0", blockIndexA);
+            ImGui::BulletText("Shader B 'Matrices' block index: %u -> binding 0", blockIndexB);
+            ImGui::Separator();
+
+            // ---- 着色器演示说明 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ 着色器演示 (键盘 1/2/3)");
+            ImGui::Spacing();
+
+            const char* shaderModes[] = {
+                "Both (全部显示)",
+                "Shader A only (gl_FragCoord)",
+                "Shader B only (gl_FrontFacing)"
+            };
+            for (int i = 0; i < 3; i++) {
+                char label[64];
+                snprintf(label, sizeof(label), "%s##mode%d", shaderModes[i], i);
+                if (ImGui::RadioButton(label, highlightShader == i)) highlightShader = i;
+            }
+            ImGui::Separator();
+
+            // Shader A 说明
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Shader A — gl_FragCoord 演示");
+            ImGui::TextWrapped(
+                "左侧 2 个立方体使用 Shader A，演示 gl_FragCoord 内建变量。\n"
+                "gl_FragCoord.xy 是当前片段在窗口中的像素坐标（左下角为原点）。\n"
+                "本例用 gl_FragCoord.x / screenWidth 做归一化，在屏幕右侧叠加暖色渐变。"
+            );
+            ImGui::Spacing();
+
+            // Shader B 说明
+            ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "Shader B — gl_FrontFacing 演示");
+            ImGui::TextWrapped(
+                "右侧 2 个立方体使用 Shader B，演示 gl_FrontFacing 内建变量。\n"
+                "gl_FrontFacing 是 bool 类型，正面 = true、背面 = false。\n"
+                "正面以原始颜色显示，背面以亮黄色高亮（需关闭面剔除）。"
+            );
+            ImGui::Separator();
+
+            // ---- 接口块说明 ----
+            ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "★ 接口块 (Interface Block)");
+            ImGui::TextWrapped(
+                "两个着色器使用 VS_OUT / FS_IN 接口块传递数据，\n"
+                "而非零散的 in/out 变量。块名必须匹配，实例名可不同。\n"
+                "接口块内容: vec3 color (顶点颜色) + vec3 fragPos (世界坐标)"
+            );
+            ImGui::Separator();
+
+            // ---- 立方体详情 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "★ 立方体详情");
+            ImGui::Spacing();
+            for (int i = 0; i < 4; i++) {
+                const char* shaderName = (i < 2) ? "Shader A" : "Shader B";
+                ImGui::BulletText("Cube %d: %s | %s", i, cubeLabels[i], shaderName);
+            }
+            ImGui::Separator();
+
+            // ---- std140 对齐规则速查 ----
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "★ std140 对齐规则速查");
+            ImGui::TextDisabled(
+                "  Type          Base Alignment\n"
+                "  ────────────────────────────\n"
+                "  float/int     4 bytes (N)\n"
+                "  vec2          8 bytes (2N)\n"
+                "  vec3/vec4     16 bytes (4N)\n"
+                "  mat4          16 bytes/col (4×4N)\n"
+                "  struct        16 bytes (vec4 padded)"
+            );
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.5f, "%.2f");
+            ImGui::SliderFloat("FOV", &fov, 10.0f, 120.0f, "%.0f°");
+            ImGui::Separator();
+
+            // ---- 清屏颜色 ----
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // ---- 快捷键提示 ----
+            ImGui::TextDisabled(
+                "1/2/3: Shader view | Tab: Panel\n"
+                "WASD/Arrows: Move | RClick+Drag: Look");
+
+            ImGui::End();
+        }
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 14. 清理 ==========
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glDeleteVertexArrays(1, &cubeVAO);
+    glDeleteBuffers(1, &cubeVBO);
+    glDeleteBuffers(1, &uboMatrices);
+    glDeleteProgram(shaderA.ID);
+    glDeleteProgram(shaderB.ID);
+    glfwTerminate();
+    return 0;
+}
+
 // 前向声明 —— 帧缓冲 Demo 定义在 main() 之后
 int runFramebuffersDemo();
 
@@ -8047,7 +8526,8 @@ int runFramebuffersDemo();
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 高级数据（Advanced Data）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 高级GLSL（Advanced GLSL）" << std::endl;
+    return runAdvancedGLSLDemo();
     return runAdvancedDataDemo();
     return runCubemapsDemo();
     return runFramebuffersDemo();
