@@ -68,6 +68,9 @@
     <Filter Include="资源文件\shaders\advanced_glsl">
       <UniqueIdentifier>{99999999-9999-9999-agls-999999999999}</UniqueIdentifier>
     </Filter>
+    <Filter Include="资源文件\shaders\geometry_shader">
+      <UniqueIdentifier>{bbbbbbbb-bbbb-bbbb-geom-bbbbbbbbbbbb}</UniqueIdentifier>
+    </Filter>
 
     <!-- notes 目录树 -->
     <Filter Include="资源文件\notes">
@@ -237,6 +240,33 @@
     <None Include="shaders\advanced_glsl\adv_glsl_b.frag">
       <Filter>资源文件\shaders\advanced_glsl</Filter>
     </None>
+    <None Include="shaders\geometry_shader\geom_normal.vert">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_normal.geom">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_normal.frag">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_explode.vert">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_explode.geom">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_explode.frag">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_house.vert">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_house.geom">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
+    <None Include="shaders\geometry_shader\geom_house.frag">
+      <Filter>资源文件\shaders\geometry_shader</Filter>
+    </None>
   </ItemGroup>
 
   <!-- ======================== None: notes ======================== -->
@@ -308,6 +338,9 @@
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\23-高级GLSL-知识点.md">
+      <Filter>资源文件\notes</Filter>
+    </None>
+    <None Include="notes\24-几何着色器-知识点.md">
       <Filter>资源文件\notes</Filter>
     </None>
     <None Include="notes\A1-渲染管线深度解析-附加.md">

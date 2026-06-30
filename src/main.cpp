@@ -1,7 +1,7 @@
 /**
  * ============================================================
  *  LearnOpenGL — 高级 OpenGL
- *  当前学习章节：高级GLSL（Advanced GLSL）
+ *  当前学习章节：几何着色器（Geometry Shader）
  * ============================================================
  */
 
@@ -8517,6 +8517,463 @@ int runAdvancedGLSLDemo()
     return 0;
 }
 
+// ╔══════════════════════════════════════════════════════════════╗
+// ║         几何着色器（Geometry Shader）                         ║
+// ╚══════════════════════════════════════════════════════════════╝
+//
+// 几何着色器位于顶点着色器和片段着色器之间，是 OpenGL 渲染管线中
+// 可选的着色器阶段。它接收一个完整的图元（点/线/三角形），
+// 可以：
+//   ① 修改图元形状（如顶点位移）
+//   ② 生成/删除图元（如从点生成房子）
+//   ③ 改变图元类型（如三角形 → 线段，用于法线可视化）
+//
+// 核心 API：
+//   - EmitVertex()    — 发射一个顶点
+//   - EndPrimitive()  — 结束当前输出图元
+//   - gl_in[]         — 内建输入数组（包含上一阶段的 gl_Position 等）
+//
+// 本 Demo 包含 4 种模式：
+//   1. 法线可视化 — 将三角形法线渲染为黄色线段
+//   2. 爆破物体   — 三角形沿面法线位移（呼吸式动画）
+//   3. 造房子     — 从 4 个点生成 4 个彩色房子
+//   4. 组合显示   — 房子 + 背包模型（法线可视化）
+
+int runGeometryShaderDemo()
+{
+    const unsigned int SCR_WIDTH  = 1280;
+    const unsigned int SCR_HEIGHT = 720;
+
+    // ========== 1. 初始化 GLFW ==========
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
+        "LearnOpenGL - Geometry Shader | 1-4: mode  WASD: move  Tab: panel", NULL, NULL);
+    if (window == NULL)
+    {
+        std::cout << "x Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+
+    // ========== 2. 初始化 GLAD ==========
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        std::cout << "x Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+
+    // ========== 3. 启用深度测试 ==========
+    glEnable(GL_DEPTH_TEST);
+
+    // ========== 4. 初始化 ImGui ==========
+    initImGuiWithChinese(window);
+
+    // ========== 5. 编译着色器（带几何着色器） ==========
+    //
+    // ★ 使用 Shader 的三参数构造函数，加载几何着色器
+    //
+    Shader normalShader(
+        "shaders/geometry_shader/geom_normal.vert",
+        "shaders/geometry_shader/geom_normal.geom",
+        "shaders/geometry_shader/geom_normal.frag",
+        true);
+    Shader explodeShader(
+        "shaders/geometry_shader/geom_explode.vert",
+        "shaders/geometry_shader/geom_explode.geom",
+        "shaders/geometry_shader/geom_explode.frag",
+        true);
+    Shader houseShader(
+        "shaders/geometry_shader/geom_house.vert",
+        "shaders/geometry_shader/geom_house.geom",
+        "shaders/geometry_shader/geom_house.frag",
+        true);
+
+    // 普通模型着色器（用于对比和第一遍渲染）
+    Shader modelShader("shaders/model/model.vert",
+                       "shaders/model/model.frag", true);
+
+    // ========== 6. 加载模型 ==========
+    Model backpack("models/backpack/backpack.obj");
+
+    // ========== 7. 造房子顶点数据（4个点 + 颜色） ==========
+    //
+    // 每个点：2D 屏幕坐标 + RGB 颜色
+    //
+    float housePoints[] = {
+        -0.5f,  0.5f,   1.0f, 0.0f, 0.0f,   // 左上角：红色房子
+         0.5f,  0.5f,   0.0f, 1.0f, 0.0f,   // 右上角：绿色房子
+         0.5f, -0.5f,   0.0f, 0.0f, 1.0f,   // 右下角：蓝色房子
+        -0.5f, -0.5f,   1.0f, 1.0f, 0.0f,   // 左下角：黄色房子
+    };
+
+    unsigned int houseVAO, houseVBO;
+    glGenVertexArrays(1, &houseVAO);
+    glGenBuffers(1, &houseVBO);
+
+    glBindVertexArray(houseVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, houseVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(housePoints), housePoints, GL_STATIC_DRAW);
+
+    // 位置属性 (location = 0): 2 floats → stride 5 floats
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+        5 * sizeof(float), (void*)0);
+    // 颜色属性 (location = 1): 3 floats → offset 2 floats
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE,
+        5 * sizeof(float), (void*)(2 * sizeof(float)));
+
+    glBindVertexArray(0);
+
+    // ========== 8. 用户控制参数 ==========
+
+    // ---- 模式选择 ----
+    int  demoMode    = 0;   // 0=法线可视化, 1=爆破, 2=造房子, 3=组合
+    const char* modeNames[] = {
+        "1. Normal Visualization",
+        "2. Exploding Triangles",
+        "3. Building Houses",
+        "4. Combined View"
+    };
+    const char* modeHints[] = {
+        "黄色线段 = 每个顶点的法线方向，按 1 切换到爆破模式",
+        "三角形沿面法线位移，呼吸式动画效果",
+        "4 个点 → 4 个房子（含白色屋顶），几何着色器动态生成 20 个顶点",
+        "房子 + 背包模型 + 法线可视化"
+    };
+
+    // ---- 摄像机 ----
+    CameraState::camPos = glm::vec3(0.0f, 1.5f, 5.0f);
+    CameraState::fov    = 45.0f;
+    float camYaw        = -90.0f;
+    float camPitch      = -10.0f;
+    float moveSpeed     = 0.05f;
+
+    // ---- 鼠标 ----
+    bool  firstMouseLocal = true;
+    float lastX = SCR_WIDTH / 2.0f;
+    float lastY = SCR_HEIGHT / 2.0f;
+
+    // ---- 模型变换 ----
+    bool  autoRotate       = true;
+    float modelRotY        = 0.0f;
+    float explodeTimeScale = 1.0f;   // 爆破动画速度
+
+    // ---- 光源（模型着色器用） ----
+    glm::vec3 lightDir(0.2f, -1.0f, -0.3f);
+
+    // ---- 显示选项 ----
+    bool showModel   = true;    // 显示背包模型
+    bool showNormals = true;    // 显示法线（模式 0/3）
+    bool showHouses  = true;    // 显示房子（模式 2/3）
+
+    // ---- 调试 ----
+    bool  showDebugPanel = true;
+    float clearColor[3]  = { 0.1f, 0.1f, 0.15f };
+
+    // ========== 9. 清屏颜色 ==========
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+
+    // ========== 10. 渲染循环 ==========
+    std::cout << "\n=== Geometry Shader Demo ===" << std::endl;
+    std::cout << "  1: 法线可视化  |  2: 爆破物体  |  3: 造房子  |  4: 组合" << std::endl;
+    std::cout << "  WASD: 移动  |  右键拖拽: 旋转  |  滚轮: 缩放" << std::endl;
+    std::cout << "  Tab: 调试面板  |  ESC: 退出" << std::endl;
+    std::cout << "=============================\n" << std::endl;
+
+    float deltaTime = 0.0f;
+    float lastFrame = 0.0f;
+
+    while (!glfwWindowShouldClose(window))
+    {
+        // ---- 帧时间 ----
+        float currentFrame = (float)glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // ---- 输入处理 ----
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
+
+        // 数字键切换模式（防抖）
+        static bool k1=false, k2=false, k3=false, k4=false;
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS && !k1) { k1=true; demoMode=0; }
+        else k1 = false;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS && !k2) { k2=true; demoMode=1; }
+        else k2 = false;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS && !k3) { k3=true; demoMode=2; }
+        else k3 = false;
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS && !k4) { k4=true; demoMode=3; }
+        else k4 = false;
+
+        // Tab 面板切换（防抖）
+        static bool tabPressed = false;
+        if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS) {
+            if (!tabPressed) { showDebugPanel = !showDebugPanel; tabPressed = true; }
+        } else tabPressed = false;
+
+        // 鼠标视角控制
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            if (firstMouseLocal) {
+                double mx, my;
+                glfwGetCursorPos(window, &mx, &my);
+                lastX = (float)mx; lastY = (float)my;
+                firstMouseLocal = false;
+            }
+            double mx, my;
+            glfwGetCursorPos(window, &mx, &my);
+            float xo = (float)(mx - lastX) * 0.1f;
+            float yo = (float)(lastY - my) * 0.1f;
+            lastX = (float)mx; lastY = (float)my;
+            camYaw += xo;
+            camPitch += yo;
+            if (camPitch > 89.0f)  camPitch = 89.0f;
+            if (camPitch < -89.0f) camPitch = -89.0f;
+        } else {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            firstMouseLocal = true;
+        }
+
+        // 摄像机朝向
+        glm::vec3 camFront;
+        camFront.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        camFront.y = sin(glm::radians(camPitch));
+        camFront.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
+        camFront = glm::normalize(camFront);
+
+        // WASD 移动
+        float velocity = moveSpeed * deltaTime * 60.0f;
+        glm::vec3 camRight = glm::normalize(glm::cross(camFront, glm::vec3(0.0f, 1.0f, 0.0f)));
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            CameraState::camPos += camFront * velocity;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            CameraState::camPos -= camFront * velocity;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            CameraState::camPos -= camRight * velocity;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            CameraState::camPos += camRight * velocity;
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+            CameraState::camPos.y -= velocity;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+            CameraState::camPos.y += velocity;
+
+        // ---- 清屏 ----
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // ---- 计算 MVP 矩阵 ----
+        glm::mat4 projection = glm::perspective(glm::radians(CameraState::fov),
+            (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 view = glm::lookAt(CameraState::camPos,
+            CameraState::camPos + camFront, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // 模型矩阵（自动旋转）
+        if (autoRotate) modelRotY += deltaTime * 30.0f;  // 每秒 30°
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(modelRotY), glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::scale(model, glm::vec3(1.0f));
+
+        // ============================================================
+        // 渲染模式
+        // ============================================================
+
+        if (demoMode == 0 && showModel)
+        {
+            // ★ 模式 0：法线可视化 —— 第一遍正常渲染模型，第二遍画法线 ★
+
+            // 第一遍：正常渲染模型
+            modelShader.use();
+            modelShader.setMat4("projection", projection);
+            modelShader.setMat4("view", view);
+            modelShader.setMat4("model", model);
+            modelShader.setVec3("viewPos", CameraState::camPos);
+            // 设置光源参数（简化）
+            modelShader.setBool("dirLightEnabled", true);
+            modelShader.setBool("pointLightsEnabled", false);
+            modelShader.setBool("spotLightEnabled", false);
+            modelShader.setVec3("dirLight.direction", lightDir);
+            modelShader.setVec3("dirLight.ambient", 0.2f, 0.2f, 0.2f);
+            modelShader.setVec3("dirLight.diffuse", 0.8f, 0.8f, 0.8f);
+            modelShader.setVec3("dirLight.specular", 1.0f, 1.0f, 1.0f);
+            backpack.Draw(modelShader);
+
+            // 第二遍：用法线着色器绘制法线线段
+            if (showNormals)
+            {
+                normalShader.use();
+                normalShader.setMat4("projection", projection);
+                normalShader.setMat4("view", view);
+                normalShader.setMat4("model", model);
+                backpack.Draw(normalShader);   // ★ 几何着色器为每个顶点生成法线线段
+            }
+        }
+        else if (demoMode == 1 && showModel)
+        {
+            // ★ 模式 1：爆破物体 —— 几何着色器沿面法线位移顶点 ★
+
+            explodeShader.use();
+            explodeShader.setMat4("projection", projection);
+            explodeShader.setMat4("view", view);
+            explodeShader.setMat4("model", model);
+            explodeShader.setFloat("time", currentFrame * explodeTimeScale);
+            // 设置纹理单元
+            explodeShader.setInt("texture_diffuse1", 0);
+            explodeShader.setVec3("lightDir", lightDir);
+            explodeShader.setVec3("viewPos", CameraState::camPos);
+            backpack.Draw(explodeShader);   // ★ 几何着色器位移三角形顶点
+        }
+        else if (demoMode == 2 && showHouses)
+        {
+            // ★ 模式 2：造房子 —— 几何着色器从 4 个点生成 4 个房子 ★
+
+            // 不需要 MVP 变换，顶点着色器直接输出裁剪空间坐标
+            houseShader.use();
+            glBindVertexArray(houseVAO);
+
+            // 用 GL_POINTS 绘制 —— 几何着色器输入点是 points
+            glDrawArrays(GL_POINTS, 0, 4);
+        }
+        else if (demoMode == 3)
+        {
+            // ★ 模式 3：组合显示 ★
+
+            // 先渲染背包模型（法线可视化）
+            if (showModel)
+            {
+                modelShader.use();
+                modelShader.setMat4("projection", projection);
+                modelShader.setMat4("view", view);
+                modelShader.setMat4("model", model);
+                modelShader.setVec3("viewPos", CameraState::camPos);
+                modelShader.setBool("dirLightEnabled", true);
+                modelShader.setBool("pointLightsEnabled", false);
+                modelShader.setBool("spotLightEnabled", false);
+                modelShader.setVec3("dirLight.direction", lightDir);
+                modelShader.setVec3("dirLight.ambient", 0.2f, 0.2f, 0.2f);
+                modelShader.setVec3("dirLight.diffuse", 0.8f, 0.8f, 0.8f);
+                modelShader.setVec3("dirLight.specular", 1.0f, 1.0f, 1.0f);
+                backpack.Draw(modelShader);
+
+                if (showNormals)
+                {
+                    normalShader.use();
+                    normalShader.setMat4("projection", projection);
+                    normalShader.setMat4("view", view);
+                    normalShader.setMat4("model", model);
+                    backpack.Draw(normalShader);
+                }
+            }
+
+            // 再渲染房子
+            if (showHouses)
+            {
+                houseShader.use();
+                glBindVertexArray(houseVAO);
+                glDrawArrays(GL_POINTS, 0, 4);
+            }
+        }
+
+        // ============================================================
+        // ImGui 调试面板
+        // ============================================================
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (showDebugPanel)
+        {
+            ImGui::Begin("Debug Panel - Geometry Shader");
+
+            ImGui::Text("FPS: %.1f  (%.1f ms)", ImGui::GetIO().Framerate,
+                1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
+
+            // ---- 模式选择 ----
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Demo Mode");
+            ImGui::Spacing();
+
+            for (int i = 0; i < 4; i++) {
+                if (ImGui::RadioButton(modeNames[i], demoMode == i)) {
+                    demoMode = i;
+                }
+            }
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.4f, 1.0f), "%s", modeHints[demoMode]);
+            ImGui::Separator();
+
+            // ---- 模式特定选项 ----
+            if (demoMode == 1) {
+                // 爆破模式：动画速度
+                ImGui::SliderFloat("Explode Speed", &explodeTimeScale, 0.1f, 3.0f, "%.1fx");
+            }
+
+            // 显示选项
+            ImGui::Checkbox("Show Model", &showModel);
+            if (demoMode == 0 || demoMode == 3) {
+                ImGui::SameLine();
+                ImGui::Checkbox("Show Normals", &showNormals);
+            }
+            if (demoMode == 2 || demoMode == 3) {
+                ImGui::Checkbox("Show Houses", &showHouses);
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("Auto Rotate", &autoRotate);
+            ImGui::Separator();
+
+            // ---- 摄像机 ----
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Camera");
+            ImGui::SliderFloat("Move Speed", &moveSpeed, 0.01f, 0.2f, "%.3f");
+            ImGui::SliderFloat("FOV", &CameraState::fov, 10.0f, 120.0f, "%.0f deg");
+            ImGui::Separator();
+
+            ImGui::ColorEdit3("Clear Color", clearColor);
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], 1.0f);
+            ImGui::Separator();
+
+            // 几何着色器知识提示
+            ImGui::TextDisabled("Geometry Shader Pipeline:");
+            ImGui::TextDisabled("  Vertices → [Vertex Shader] → [Geometry Shader] → [Fragment Shader]");
+            ImGui::TextDisabled("  EmitVertex() / EndPrimitive() 控制图元输出");
+            ImGui::Separator();
+            ImGui::TextDisabled(
+                "1-4: Switch mode  |  Tab: Panel\n"
+                "WASD: Move  |  RightClick+Drag: Look\n"
+                "Scroll: Zoom  |  ESC: Exit");
+
+            ImGui::End();
+        }
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    // ========== 11. 清理 ==========
+    glDeleteVertexArrays(1, &houseVAO);
+    glDeleteBuffers(1, &houseVBO);
+    glDeleteProgram(normalShader.ID);
+    glDeleteProgram(explodeShader.ID);
+    glDeleteProgram(houseShader.ID);
+    glDeleteProgram(modelShader.ID);
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    glfwTerminate();
+    return 0;
+}
 // 前向声明 —— 帧缓冲 Demo 定义在 main() 之后
 int runFramebuffersDemo();
 
@@ -8526,7 +8983,8 @@ int runFramebuffersDemo();
 
 int main()
 {
-    std::cout << "▶ 运行最新章节：高级 OpenGL — 高级GLSL（Advanced GLSL）" << std::endl;
+    std::cout << "▶ 运行最新章节：高级 OpenGL — 几何着色器（Geometry Shader）" << std::endl;
+    return runGeometryShaderDemo();
     return runAdvancedGLSLDemo();
     return runAdvancedDataDemo();
     return runCubemapsDemo();

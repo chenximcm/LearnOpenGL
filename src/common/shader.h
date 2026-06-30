@@ -73,16 +73,37 @@ public:
     {
         if (fromFile)
         {
-            // 从文件路径读取源码字符串
             std::string vCode = loadFile(vertexSource);
             std::string fCode = loadFile(fragmentSource);
-            // 把 string 转成 const char* 传给 compile()
             compile(vCode.c_str(), fCode.c_str());
         }
         else
         {
-            // 直接用源码字符串编译
             compile(vertexSource, fragmentSource);
+        }
+    }
+
+    /**
+     * 带几何着色器的构造函数
+     *
+     * @param vertexSource   顶点着色器源码或文件路径
+     * @param geometrySource 几何着色器源码或文件路径
+     * @param fragmentSource 片段着色器源码或文件路径
+     * @param fromFile       为 true 时，前三参数作为文件路径读取
+     */
+    Shader(const char* vertexSource, const char* geometrySource,
+           const char* fragmentSource, bool fromFile = false)
+    {
+        if (fromFile)
+        {
+            std::string vCode = loadFile(vertexSource);
+            std::string gCode = loadFile(geometrySource);
+            std::string fCode = loadFile(fragmentSource);
+            compile(vCode.c_str(), gCode.c_str(), fCode.c_str());
+        }
+        else
+        {
+            compile(vertexSource, geometrySource, fragmentSource);
         }
     }
 
@@ -335,41 +356,64 @@ private:
      */
     void compile(const char* vertexSource, const char* fragmentSource)
     {
-        // ===== 1. 编译顶点着色器 =====
         unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-
-        // glShaderSource 参数说明：
-        //   - shader:    着色器对象
-        //   - count:     源码字符串数量（1 个）
-        //   - string:    指向源码字符串的指针的指针
-        //   - length:    长度（NULL 表示自动计算）
         glShaderSource(vertexShader, 1, &vertexSource, NULL);
         glCompileShader(vertexShader);
-
-        // 检查编译结果 —— 失败则输出错误日志
         checkCompileErrors(vertexShader, "VERTEX");
 
-        // ===== 2. 编译片段着色器 =====
         unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
         glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
         glCompileShader(fragmentShader);
         checkCompileErrors(fragmentShader, "FRAGMENT");
 
-        // ===== 3. 链接成完整的着色器程序 =====
         ID = glCreateProgram();
-
-        // 把两个着色器「粘合」到一个程序中
         glAttachShader(ID, vertexShader);
         glAttachShader(ID, fragmentShader);
-
-        // 链接 —— 检查顶点输出是否匹配片段输入
         glLinkProgram(ID);
         checkCompileErrors(ID, "PROGRAM");
 
-        // ===== 4. 清理 =====
-        // 链接完成后，原始的着色器对象不再需要
-        // 程序对象中已经保存了编译后的二进制代码
         glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+    }
+
+    /**
+     * 带几何着色器的核心编译逻辑
+     *
+     * 相比两阶段（VS+FS）编译，多了几何着色器的创建和附着。
+     * 几何着色器类型为 GL_GEOMETRY_SHADER。
+     */
+    void compile(const char* vertexSource, const char* geometrySource,
+                 const char* fragmentSource)
+    {
+        // ===== 1. 编译顶点着色器 =====
+        unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vertexShader, 1, &vertexSource, NULL);
+        glCompileShader(vertexShader);
+        checkCompileErrors(vertexShader, "VERTEX");
+
+        // ===== 2. 编译几何着色器 =====
+        unsigned int geometryShader = glCreateShader(GL_GEOMETRY_SHADER);
+        glShaderSource(geometryShader, 1, &geometrySource, NULL);
+        glCompileShader(geometryShader);
+        checkCompileErrors(geometryShader, "GEOMETRY");
+
+        // ===== 3. 编译片段着色器 =====
+        unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fragmentShader, 1, &fragmentSource, NULL);
+        glCompileShader(fragmentShader);
+        checkCompileErrors(fragmentShader, "FRAGMENT");
+
+        // ===== 4. 链接程序 =====
+        ID = glCreateProgram();
+        glAttachShader(ID, vertexShader);
+        glAttachShader(ID, geometryShader);
+        glAttachShader(ID, fragmentShader);
+        glLinkProgram(ID);
+        checkCompileErrors(ID, "PROGRAM");
+
+        // ===== 5. 清理着色器对象 =====
+        glDeleteShader(vertexShader);
+        glDeleteShader(geometryShader);
         glDeleteShader(fragmentShader);
     }
 

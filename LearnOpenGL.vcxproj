@@ -213,6 +213,15 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="shaders\advanced_glsl\adv_glsl.vert" />
     <None Include="shaders\advanced_glsl\adv_glsl_a.frag" />
     <None Include="shaders\advanced_glsl\adv_glsl_b.frag" />
+    <None Include="shaders\geometry_shader\geom_normal.vert" />
+    <None Include="shaders\geometry_shader\geom_normal.geom" />
+    <None Include="shaders\geometry_shader\geom_normal.frag" />
+    <None Include="shaders\geometry_shader\geom_explode.vert" />
+    <None Include="shaders\geometry_shader\geom_explode.geom" />
+    <None Include="shaders\geometry_shader\geom_explode.frag" />
+    <None Include="shaders\geometry_shader\geom_house.vert" />
+    <None Include="shaders\geometry_shader\geom_house.geom" />
+    <None Include="shaders\geometry_shader\geom_house.frag" />
   </ItemGroup>
   <ItemGroup>
     <None Include="notes\01-创建窗口-知识点.md" />
@@ -238,6 +247,7 @@ copy /Y "$(ProjectDir)vendor\assimp-vc140-mt.dll" "$(OutDir)"</Command>
     <None Include="notes\21-立方体贴图-知识点.md" />
     <None Include="notes\22-高级数据-知识点.md" />
     <None Include="notes\23-高级GLSL-知识点.md" />
+    <None Include="notes\24-几何着色器-知识点.md" />
     <None Include="notes\A1-渲染管线深度解析-附加.md" />
   </ItemGroup>
   <ItemGroup>
